@@ -210,7 +210,7 @@ impl Default for PetConfig {
     fn default() -> Self {
         let lib = PettingDetectorConfig::default();
         Self {
-            alsa_device: "plughw:aic3104,0".into(),
+            alsa_device: "plughw:i2saudio,0".into(),
             model_path: PathBuf::from("/opt/robot/daemon/current/models/pet_detect.onnx"),
             enter_threshold: lib.enter_threshold,
             exit_threshold: lib.exit_threshold,

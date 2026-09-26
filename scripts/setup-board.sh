@@ -109,9 +109,9 @@ MIGRATE="/tmp/${MIGRATE_NAME}"
 MIGRATE_SELF=/usr/local/sbin/robot-migrate-network
 NET_CHECK_UNIT=/etc/systemd/system/robot-net-check.service
 
-# Only what `robotd` needs. The prototype also enables i2c-gpio-pihat, aic3104-pihat and a
+# Only what `robotd` needs. The prototype also enabled i2c-gpio-pihat, aic3104-pihat and a
 # camera overlay; none apply here — our IMU rides the Dynamixel bus rather than I²C, and
-# `robotd` owns no camera or audio.
+# audio is the I2S MAX98357A + INMP441 pair set up by configure_audio.
 REQUIRED_OVERLAY=uart2-m0
 
 needs_reboot=0
@@ -490,13 +490,12 @@ free_motor_port() {
 #   2. The Armbian *vendor* (BSP 6.1) kernel: the codec's I²S clock tree only exists there,
 #      and the DKMS module builds against its headers.
 #   3. Device-tree overlays, compiled from the sources vendored in deploy/audio/: the
-#      hardware i2c3 bus on header pins 3/5, and the codec + I²S sound card grafted onto it.
-#      (The prototype also kept a bit-banged i2c-gpio fallback; it was the revert path for
-#      rise-time trouble that never came back, and it is not carried here.)
-#   4. The codec driver itself, out of tree via DKMS — the vendor kernel does not build
-#      SND_SOC_AIC3X, which is why a stock board has no aic3104 card.
-#   5. Mixer levels at boot: aic3104-init.service, running the vendored amixer script
-#      before robotd so the greet is audible.
+#      I2S sound card (MAX98357A speaker + INMP441 microphone) grafted onto I2S3.
+#   4. The codec drivers, out of tree via DKMS — max98357a (playback) and inmp441
+#      (capture). The vendor kernel does not build these, which is why a stock board
+#      has no i2s-audio card.
+#   5. PipeWire audio at boot: i2s-audio.service runs the PipeWire init that sets the
+#      pro-audio profile and mic gain before robotd starts.
 #
 # The voice bank itself is NOT provisioned here — the release's postinstall renders it with
 # the `sounds` binary the release carries, seeded from the SoC serial.
@@ -587,14 +586,14 @@ configure_audio() {
     dtbo_dir="/boot/dtb-${vendor_ver}/rockchip/overlay"
     [ -d "$dtbo_dir" ] || dtbo_dir=$(find /boot -maxdepth 3 -type d -path '*/rockchip/overlay' 2>/dev/null | head -1)
     if [ -n "$dtbo_dir" ]; then
-        for ov_name in i2c3-pihat aic3104-i2c3; do
+        for ov_name in max98357a-inmp441; do
             ov_tmp=$(mktemp -d)
             if fetch_repo_file "deploy/audio/${ov_name}.dts" "$ov_tmp/src.dts" \
                 && dtc -@ -I dts -O dtb -o "$ov_tmp/out.dtbo" "$ov_tmp/src.dts" 2>/dev/null; then
-                if [ ! -f "$dtbo_dir/rk3568-${ov_name}.dtbo" ] \
-                    || ! cmp -s "$ov_tmp/out.dtbo" "$dtbo_dir/rk3568-${ov_name}.dtbo"; then
-                    say "installing overlay rk3568-${ov_name}.dtbo"
-                    cp "$ov_tmp/out.dtbo" "$dtbo_dir/rk3568-${ov_name}.dtbo"
+                if [ ! -f "$dtbo_dir/${ov_name}.dtbo" ] \
+                    || ! cmp -s "$ov_tmp/out.dtbo" "$dtbo_dir/${ov_name}.dtbo"; then
+                    say "installing overlay ${ov_name}.dtbo"
+                    cp "$ov_tmp/out.dtbo" "$dtbo_dir/${ov_name}.dtbo"
                     needs_reboot=1
                 fi
                 ensure_overlay_word "$ov_name"
@@ -607,28 +606,39 @@ configure_audio() {
         warn "no rockchip overlay directory under /boot — audio overlays not installed"
     fi
 
-    # 4. The codec driver, via DKMS. Versioned by the vendored dkms.conf, so a source bump
-    #    upstream re-deploys cleanly.
-    dkms_tmp=$(mktemp -d)
-    dkms_ok=1
-    for f in dkms.conf Makefile tlv320aic3x.c tlv320aic3x.h tlv320aic3x-i2c.c; do
-        fetch_repo_file "deploy/audio/aic3x-dkms/$f" "$dkms_tmp/$f" || { dkms_ok=0; break; }
-    done
-    if [ "$dkms_ok" = 1 ]; then
+    # 4. The codec drivers, via DKMS. Two modules: max98357a (speaker) and inmp441 (mic).
+    #    Versioned by the vendored dkms.conf, so a source bump re-deploys cleanly.
+    install_i2s_dkms() {
+        local mod_name="$1"    # e.g. "max98357a"
+        local mod_dir="$2"     # e.g. "deploy/audio/max98357a-dkms"
+        local mod_files="$3"   # space-separated file list
+
+        local dkms_tmp
+        dkms_tmp=$(mktemp -d)
+        local dkms_ok=1
+        for f in $mod_files; do
+            fetch_repo_file "${mod_dir}/$f" "$dkms_tmp/$f" || { dkms_ok=0; break; }
+        done
+        if [ "$dkms_ok" != 1 ]; then
+            warn "could not fetch the $mod_name DKMS sources — audio will not work"
+            rm -rf "$dkms_tmp"
+            return 1
+        fi
+        local dkms_ver
         dkms_ver=$(sed -n 's/^PACKAGE_VERSION="\(.*\)"$/\1/p' "$dkms_tmp/dkms.conf")
-        dkms_src="/usr/src/aic3x-$dkms_ver"
-        deploy_needed=0
-        for f in dkms.conf Makefile tlv320aic3x.c tlv320aic3x.h tlv320aic3x-i2c.c; do
+        local dkms_src="/usr/src/${mod_name}-${dkms_ver}"
+        local deploy_needed=0
+        for f in $mod_files; do
             cmp -s "$dkms_tmp/$f" "$dkms_src/$f" || deploy_needed=1
         done
         if [ "$deploy_needed" = 1 ]; then
-            say "deploying aic3x DKMS sources to $dkms_src"
-            dkms remove "aic3x/$dkms_ver" --all >/dev/null 2>&1 || true
+            say "deploying $mod_name DKMS sources to $dkms_src"
+            dkms remove "${mod_name}/$dkms_ver" --all >/dev/null 2>&1 || true
             mkdir -p "$dkms_src"
             cp "$dkms_tmp"/* "$dkms_src/"
         fi
-        if dkms status "aic3x/$dkms_ver" 2>/dev/null | grep "$vendor_ver" | grep -q installed; then
-            say "aic3x DKMS module already installed"
+        if dkms status "${mod_name}/$dkms_ver" 2>/dev/null | grep "$vendor_ver" | grep -q installed; then
+            say "$mod_name DKMS module already installed"
         else
             # Armbian ships the vendor headers without built host tools; DKMS needs modpost.
             if [ -d "/usr/src/linux-headers-$vendor_ver" ] \
@@ -636,59 +646,38 @@ configure_audio() {
                 say "rebuilding the vendor headers' host tools (modpost)"
                 dpkg-reconfigure linux-headers-vendor-rk35xx >/dev/null 2>&1 || true
             fi
-            say "building the aic3x codec driver via DKMS (takes a minute)"
-            if dkms install "aic3x/$dkms_ver" -k "$vendor_ver"; then
-                say "aic3x DKMS module installed for $vendor_ver"
+            say "building the $mod_name driver via DKMS (takes a minute)"
+            if dkms install "${mod_name}/$dkms_ver" -k "$vendor_ver"; then
+                say "$mod_name DKMS module installed for $vendor_ver"
                 needs_reboot=1
             else
-                warn "DKMS build failed — audio will not work"
-                warn "see /var/lib/dkms/aic3x/$dkms_ver/build/make.log"
+                warn "DKMS build failed for $mod_name — audio will not work"
+                warn "see /var/lib/dkms/${mod_name}/$dkms_ver/build/make.log"
             fi
         fi
-    else
-        warn "could not fetch the aic3x DKMS sources — audio will not work"
-    fi
-    rm -rf "$dkms_tmp"
+        rm -rf "$dkms_tmp"
+    }
 
-    # 5. Mixer levels at boot. The service polls for the card (the probe is deferred until
-    #    the DKMS module autoloads), sets the speaker path and routes the onboard mic.
-    init_tmp=$(mktemp)
-    if fetch_repo_file "deploy/audio/aic3104-init.sh" "$init_tmp"; then
-        if [ ! -f /usr/local/bin/aic3104-init.sh ] \
-            || ! cmp -s "$init_tmp" /usr/local/bin/aic3104-init.sh; then
-            say "installing /usr/local/bin/aic3104-init.sh"
-            install -m 755 "$init_tmp" /usr/local/bin/aic3104-init.sh
+    install_i2s_dkms "max98357a" "deploy/audio/max98357a-dkms" "dkms.conf Makefile max98357a.c"
+    install_i2s_dkms "inmp441"   "deploy/audio/inmp441-dkms"       "dkms.conf Makefile inmp441.c"
+
+    # 5. I2S audio setup. Fetches and runs the full I2S audio setup script which
+    #    installs PipeWire, configures the pro-audio profile, sets mic gain, and
+    #    patches the base DTB for correct I2S3 clocking.
+    i2s_script="/usr/local/bin/setup-i2s-audio.sh"
+    i2s_tmp=$(mktemp)
+    if fetch_repo_file "scripts/setup-i2s-audio.sh" "$i2s_tmp"; then
+        if [ ! -f "$i2s_script" ] \
+            || ! cmp -s "$i2s_tmp" "$i2s_script"; then
+            say "installing $i2s_script"
+            install -m 755 "$i2s_tmp" "$i2s_script"
         fi
-        svc_tmp=$(mktemp)
-        cat > "$svc_tmp" <<'UNIT'
-[Unit]
-Description=TLV320AIC3104 mixer init
-After=systemd-modules-load.service
-# No ConditionPathExists: the sound card probe is deferred until the DKMS codec module
-# autoloads, so the card can appear seconds into boot — the script polls for it instead.
-Before=robotd.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/aic3104-init.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-        if [ ! -f /etc/systemd/system/aic3104-init.service ] \
-            || ! cmp -s "$svc_tmp" /etc/systemd/system/aic3104-init.service; then
-            say "installing aic3104-init.service"
-            install -m 644 "$svc_tmp" /etc/systemd/system/aic3104-init.service
-            systemctl daemon-reload
-        fi
-        systemctl is-enabled --quiet aic3104-init.service \
-            || systemctl enable aic3104-init.service >/dev/null 2>&1 || true
-        rm -f "$svc_tmp"
+        say "running I2S audio setup (PipeWire + overlays + DKMS)"
+        sh "$i2s_script" || warn "I2S audio setup had errors — check output above"
     else
-        warn "could not fetch aic3104-init.sh — the mixer stays at power-on levels"
+        warn "could not fetch setup-i2s-audio.sh — audio will not work"
     fi
-    rm -f "$init_tmp"
+    rm -f "$i2s_tmp"
 }
 
 # ── the head ToF sensor's bus ──────────────────────────────────────────────────

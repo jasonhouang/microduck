@@ -254,11 +254,11 @@ accept = true
 
 [audio]
 bank = "$STATE/sounds/DUCK"
-# plughw:aic3104 is the board's codec, and robotd passes it to aplay with -D, so on anything that is
+# plughw:i2saudio,1 is the board's I2S speaker, and robotd passes it to aplay with -D, so on anything that is
 # not a robot every sound fails before ALSA's default is ever consulted. That failure is logged and
 # skipped by design, which is why a silent duck looks like a sound bug. No backticks in this comment:
 # the heredoc is unquoted so that $REPO expands, which means backticks run as commands — these three
-# words were being executed, and "plughw:aic3104: not found" is a confusing thing to read.
+# words were being executed, and "plughw:i2saudio,1: not found" is a confusing thing to read.
 device = "default"
 
 # Its own depth sensor. On a board this is /run/tofd/tof.sock and needs no saying; here every duck
