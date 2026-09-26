@@ -736,7 +736,7 @@ pub struct HeadImuParams {
 pub struct AudioParams {
     /// Master switch: no sounds, no mic worker.
     pub enabled: bool,
-    /// ALSA playback device — the TLV320AIC3104 codec.
+    /// ALSA playback device — the I2S audio card (MAX98357A + INMP441).
     pub device: String,
     /// Where the per-robot voice bank lives. The release's postinstall renders it there
     /// (`sounds ensure-bank`), seeded from the SoC serial.
@@ -761,7 +761,7 @@ impl Default for AudioParams {
     fn default() -> Self {
         Self {
             enabled: true,
-            device: "plughw:aic3104".to_owned(),
+            device: "plughw:i2saudio,1".to_owned(),
             bank: PathBuf::from("/var/lib/robot/sounds"),
             greet: true,
             pet_detect: None,
@@ -782,17 +782,14 @@ impl AudioParams {
         self.pet_detect.unwrap_or(false)
     }
 
-    /// The capture PCM for the mic worker: the playback device with subdevice 0. Only
-    /// appended when the operator has not already spelled a subdevice out — `plughw:aic3104`
-    /// in `robotd.toml` is the default and needs it, but the equally natural full spec
-    /// `plughw:aic3104,0` would otherwise become `plughw:aic3104,0,0`, which no card
-    /// answers to. That lands the worker in its restart loop for the life of the daemon.
+    /// The capture PCM for the mic worker: the card base with subdevice 0. On the I2S audio
+    /// card, playback lives on device 1 (max98357a speaker) and capture on device 0 (inmp441
+    /// mic), so the capture device strips any playback subdevice and re-pins to `,0`. An
+    /// operator who writes `plughw:i2saudio,1` gets `plughw:i2saudio,0` for capture; one who
+    /// writes the bare `plughw:i2saudio` gets the same.
     pub fn capture_device(&self) -> String {
-        if self.device.contains(',') {
-            self.device.clone()
-        } else {
-            format!("{},0", self.device)
-        }
+        let base = self.device.split_once(',').map_or(self.device.as_str(), |(b, _)| b);
+        format!("{},0", base)
     }
 
     /// The classifier path, or `None` when disabled with the `"none"` sentinel.
@@ -2819,22 +2816,22 @@ mod tests {
         path
     }
 
-    /// The capture device is derived from the playback one, and the derivation must be
-    /// idempotent: an operator who writes the full ALSA spec gets the device they wrote,
-    /// not one with a second subdevice glued on that no card answers to.
+    /// The capture device is always `base,0` regardless of which subdevice playback uses.
+    /// On the I2S audio card, playback is device 1 (max98357a) and capture is device 0
+    /// (inmp441), so stripping the playback subdevice and re-pinning to `,0` is correct.
     #[test]
-    fn the_capture_device_does_not_double_its_subdevice() {
+    fn the_capture_device_is_always_base_zero() {
         let plain = AudioParams {
-            device: "plughw:aic3104".to_owned(),
+            device: "plughw:i2saudio,1".to_owned(),
             ..AudioParams::default()
         };
-        assert_eq!(plain.capture_device(), "plughw:aic3104,0");
+        assert_eq!(plain.capture_device(), "plughw:i2saudio,0");
 
         let spelled_out = AudioParams {
-            device: "plughw:aic3104,0".to_owned(),
+            device: "plughw:i2saudio,0".to_owned(),
             ..AudioParams::default()
         };
-        assert_eq!(spelled_out.capture_device(), "plughw:aic3104,0");
+        assert_eq!(spelled_out.capture_device(), "plughw:i2saudio,0");
     }
 
     /// An unprovisioned board must still come up. A daemon that refuses to start because a
