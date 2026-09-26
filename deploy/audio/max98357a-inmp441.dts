@@ -1,0 +1,70 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "radxa,zero-3w", "rockchip,rk3566";
+
+    fragment@0 {
+        target = <&i2s3_2ch>;
+        __overlay__ {
+            status = "okay";
+            pinctrl-names = "default";
+            pinctrl-0 = <&i2s3m0_lrck &i2s3m0_sclk &i2s3m0_sdi &i2s3m0_sdo>;
+            #sound-dai-cells = <0>;
+        };
+    };
+
+    fragment@1 {
+        target-path = "/";
+        __overlay__ {
+            max98357a: max98357a {
+                compatible = "maxim,max98357a";
+                #sound-dai-cells = <0>;
+                status = "okay";
+            };
+
+            inmp441: inmp441 {
+                compatible = "mems,inmp441";
+                #sound-dai-cells = <0>;
+                status = "okay";
+            };
+
+            sound_i2s: sound-i2s {
+                compatible = "simple-audio-card";
+                simple-audio-card,name = "i2s-audio";
+
+                /* Playback DAI link */
+                simple-audio-card,dai-link@0 {
+                    reg = <0>;
+                    format = "i2s";
+                    bitclock-master = <&pb_cpu_dai>;
+                    frame-master = <&pb_cpu_dai>;
+
+                    pb_cpu_dai: cpu {
+                        sound-dai = <&i2s3_2ch>;
+                    };
+
+                    codec {
+                        sound-dai = <&max98357a>;
+                    };
+                };
+
+                /* Capture DAI link */
+                simple-audio-card,dai-link@1 {
+                    reg = <1>;
+                    format = "i2s";
+                    bitclock-master = <&cap_cpu_dai>;
+                    frame-master = <&cap_cpu_dai>;
+
+                    cap_cpu_dai: cpu {
+                        sound-dai = <&i2s3_2ch>;
+                    };
+
+                    codec {
+                        sound-dai = <&inmp441>;
+                    };
+                };
+            };
+        };
+    };
+};
