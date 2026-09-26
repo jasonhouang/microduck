@@ -231,8 +231,10 @@ for item in json.load(sys.stdin):
 " 2>/dev/null)
 [ -n "\$ID" ] && pw-cli set-param "\$ID" Profile '{"index":2}' 2>/dev/null
 
-# Set mic gain (20dB = 130/255)
-amixer -c 1 cset numid=12 130 >/dev/null 2>&1 || true
+# Set mic gain: hardware max (255) + software 5x boost via PipeWire
+amixer -c 1 cset numid=12 255 >/dev/null 2>&1 || true
+sleep 2
+wpctl set-volume @DEFAULT_AUDIO_SOURCE@ 5.0 2>/dev/null || true
 INITEOF
     chmod +x /usr/local/bin/i2s-pipewire-init.sh
 
