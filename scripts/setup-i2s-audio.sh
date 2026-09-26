@@ -232,8 +232,121 @@ EOF
     alsactl store -f /var/lib/alsa/asound.state 2>/dev/null || true
 }
 
+install_pipewire_aec() {
+    # Install PipeWire + echo cancellation for simultaneous playback+recording
+    # without the mic picking up what the speaker is playing.
+    if [ -f /etc/systemd/system/i2s-audio-pipewire.service ]; then
+        say "PipeWire AEC already installed"
+        return 0
+    fi
+    say "installing PipeWire + echo cancellation (AEC)"
+
+    apt-get install -y pipewire pipewire-alsa wireplumber >/dev/null 2>&1 || \
+        warn "failed to install pipewire packages — AEC not available"
+
+    # PipeWire echo-cancel config (run as user)
+    local pw_uid
+    pw_uid=$(id -u "${SUDO_USER:-$USER}" 2>/dev/null || echo 1000)
+    local pw_user
+    pw_user=$(getent passwd "$pw_uid" | cut -d: -f1)
+
+    local pipewire_conf
+    pipewire_conf=$(sudo -u "$pw_user" sh -c 'echo ~/.config/pipewire/pipewire.conf.d')
+    sudo -u "$pw_user" mkdir -p "$pipewire_conf"
+    cat > /tmp/pipewire-aec.conf << 'EOF'
+context.modules = [
+    {   name = libpipewire-module-echo-cancel
+        args = {
+            capture.source = "alsa_input.platform-sound-i2s.pro-input-0"
+            sink.capture.name = "echo_cancel_sink_input"
+            source.name = "Echo Canceled Microphone"
+            source.props = { node.name = "aec_mic" }
+            sink.name = "Echo Canceled Speaker"
+            sink.props  = { node.name = "aec_speaker" }
+            webrtc.webrtc_echo_cancellation  = true
+            webrtc.webrtc_noise_suppression  = true
+            webrtc.webrtc_gain_control       = true
+        }
+    }
+]
+EOF
+    sudo -u "$pw_user" cp /tmp/pipewire-aec.conf "$pipewire_conf/99-echo-cancel.conf"
+    rm -f /tmp/pipewire-aec.conf
+
+    # Init script: set pro-audio profile on the I2S card so both playback
+    # and capture nodes are exposed
+    cat > /usr/local/bin/i2s-pipewire-init.sh << INITEOF
+#!/bin/sh
+sleep 5
+export XDG_RUNTIME_DIR=/run/user/$pw_uid
+ID=\$(pw-dump 2>/dev/null | python3 -c "
+import json,sys
+for item in json.load(sys.stdin):
+    name = item.get('info',{}).get('props',{}).get('device.name','')
+    if 'i2s' in name:
+        print(item.get('id',''))
+        break
+" 2>/dev/null)
+[ -n "\$ID" ] && pw-cli set-param "\$ID" Profile '{"index":2}' 2>/dev/null
+amixer -c 1 cset numid=12 130 >/dev/null 2>&1 || true
+INITEOF
+    chmod +x /usr/local/bin/i2s-pipewire-init.sh
+
+    # System-level services so AEC starts at boot without requiring login
+    cat > /etc/systemd/system/i2s-audio-pipewire.service << SVCEOF
+[Unit]
+Description=PipeWire for I2S audio
+After=network.target
+[Service]
+Type=simple
+User=$pw_user
+Environment=XDG_RUNTIME_DIR=/run/user/$pw_uid
+ExecStartPre=/bin/sh -c 'mkdir -p /run/user/$pw_uid && chown $pw_user:$pw_user /run/user/$pw_uid'
+ExecStart=/usr/bin/pipewire
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+    cat > /etc/systemd/system/i2s-audio-wireplumber.service << SVCEOF
+[Unit]
+Description=WirePlumber for I2S audio
+After=i2s-audio-pipewire.service
+Requires=i2s-audio-pipewire.service
+[Service]
+Type=simple
+User=$pw_user
+Environment=XDG_RUNTIME_DIR=/run/user/$pw_uid
+ExecStart=/usr/bin/wireplumber
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+    cat > /etc/systemd/system/i2s-audio-aec-init.service << 'SVCEOF'
+[Unit]
+Description=Initialize I2S pro-audio profile + AEC
+After=i2s-audio-wireplumber.service
+Requires=i2s-audio-wireplumber.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/i2s-pipewire-init.sh
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+    systemctl daemon-reload
+    systemctl enable i2s-audio-pipewire.service \
+                     i2s-audio-wireplumber.service \
+                     i2s-audio-aec-init.service 2>/dev/null || true
+}
+
 install_i2s_pm_fix
 install_asound_conf
+install_pipewire_aec
 
 # Clean up legacy SD GPIO systemd service if present (now handled by the
 # max98357a driver via sdmode-gpios in the device tree overlay)
