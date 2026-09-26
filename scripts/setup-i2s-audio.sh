@@ -199,59 +199,21 @@ EOF
     fi
 }
 
-remove_asound_conf() {
-    # pipewire-alsa (99-pipewire-default.conf) already sets pcm.!default to
-    # type pipewire. A custom /etc/asound.conf would OVERRIDE that and break
-    # routing. Remove any leftover config so PipeWire defaults apply.
-    if [ -f /etc/asound.conf ]; then
-        say "removing /etc/asound.conf (pipewire-alsa handles defaults)"
-        rm -f /etc/asound.conf
-    fi
-}
-
-install_pipewire_aec() {
-    # Install PipeWire + echo cancellation for simultaneous playback+recording
-    # without the mic picking up what the speaker is playing.
-    if [ -f /etc/systemd/system/i2s-audio-pipewire.service ]; then
-        say "PipeWire AEC already installed"
-        return 0
-    fi
-    say "installing PipeWire + echo cancellation (AEC)"
+install_pipewire_audio() {
+    # Install PipeWire for audio routing. pro-audio profile exposes both
+    # playback and capture on the I2S card simultaneously.
+    # Echo cancellation is left to the application layer (e.g. WebRTC).
+    say "installing PipeWire audio"
 
     apt-get install -y pipewire pipewire-alsa wireplumber >/dev/null 2>&1 || \
-        warn "failed to install pipewire packages — AEC not available"
+        warn "failed to install pipewire packages"
 
-    # PipeWire echo-cancel config (run as user)
     local pw_uid
     pw_uid=$(id -u "${SUDO_USER:-$USER}" 2>/dev/null || echo 1000)
     local pw_user
     pw_user=$(getent passwd "$pw_uid" | cut -d: -f1)
 
-    local pipewire_conf
-    pipewire_conf=$(sudo -u "$pw_user" sh -c 'echo ~/.config/pipewire/pipewire.conf.d')
-    sudo -u "$pw_user" mkdir -p "$pipewire_conf"
-    cat > /tmp/pipewire-aec.conf << 'EOF'
-context.modules = [
-    {   name = libpipewire-module-echo-cancel
-        args = {
-            capture.source = "alsa_input.platform-sound-i2s.pro-input-0"
-            output = "alsa_output.platform-sound-i2s.pro-output-1"
-            sink.capture.name = "echo_cancel_sink_input"
-            source.name = "Echo Canceled Microphone"
-            source.props = { node.name = "aec_mic" }
-            sink.name = "Echo Canceled Speaker"
-            sink.props  = { node.name = "aec_speaker" }
-            webrtc.webrtc_echo_cancellation  = true
-            webrtc.webrtc_noise_suppression  = true
-            webrtc.webrtc_gain_control       = true
-        }
-    }
-]
-EOF
-    sudo -u "$pw_user" cp /tmp/pipewire-aec.conf "$pipewire_conf/99-echo-cancel.conf"
-    rm -f /tmp/pipewire-aec.conf
-
-    # Init script: set pro-audio profile + fix AEC routing + set defaults
+    # Init script: set pro-audio profile + mic gain
     cat > /usr/local/bin/i2s-pipewire-init.sh << INITEOF
 #!/bin/sh
 # Wait for PipeWire + WirePlumber to fully start
@@ -269,20 +231,6 @@ for item in json.load(sys.stdin):
 " 2>/dev/null)
 [ -n "\$ID" ] && pw-cli set-param "\$ID" Profile '{"index":2}' 2>/dev/null
 
-# Wait for AEC nodes to be created AND WirePlumber to finish setting defaults
-sleep 5
-
-# Set AEC nodes as PipeWire default sink/source (for ALSA pipewire plugin)
-pw-metadata 0 default.audio.sink  '{ "name": "aec_speaker" }' 2>/dev/null
-pw-metadata 0 default.audio.source '{ "name": "aec_mic" }' 2>/dev/null
-
-# Fix routing: echo-cancel-playback -> I2S speaker (not HDMI)
-# In pro-audio mode, I2S output uses AUX ports
-pw-link -d echo-cancel-playback:output_FL alsa_output.platform-hdmi-sound.stereo-fallback:playback_FL 2>/dev/null
-pw-link -d echo-cancel-playback:output_FR alsa_output.platform-hdmi-sound.stereo-fallback:playback_FR 2>/dev/null
-pw-link echo-cancel-playback:output_FL alsa_output.platform-sound-i2s.pro-output-1:playback_AUX0 2>/dev/null
-pw-link echo-cancel-playback:output_FR alsa_output.platform-sound-i2s.pro-output-1:playback_AUX1 2>/dev/null
-
 # Set mic gain (20dB = 130/255)
 amixer -c 1 cset numid=12 130 >/dev/null 2>&1 || true
 INITEOF
@@ -291,7 +239,7 @@ INITEOF
     # User-level services via lingering (no login required to start audio)
     loginctl enable-linger "$pw_user" 2>/dev/null || true
 
-    # Enable user-level PipeWire + WirePlumber (already installed by package)
+    # Enable user-level PipeWire + WirePlumber
     sudo -u "$pw_user" env \
         XDG_RUNTIME_DIR=/run/user/"$pw_uid" \
         DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$pw_uid"/bus \
@@ -307,12 +255,12 @@ INITEOF
         chown -R "$pw_user:$pw_user" "/home/$pw_user/.config/systemd"
     }
 
-    # User-level init service for AEC setup (pro-audio profile, defaults, routing)
+    # User-level init service
     local user_systemd="/home/$pw_user/.config/systemd/user"
     mkdir -p "$user_systemd"
-    cat > "$user_systemd/i2s-aec-init.service" << 'SVCEOF'
+    cat > "$user_systemd/i2s-audio-init.service" << 'SVCEOF'
 [Unit]
-Description=Initialize I2S AEC (pro-audio profile + defaults + routing)
+Description=Initialize I2S audio (pro-audio profile + mic gain)
 After=wireplumber.service
 Requires=wireplumber.service
 [Service]
@@ -322,20 +270,25 @@ RemainAfterExit=yes
 [Install]
 WantedBy=default.target
 SVCEOF
-    chown "$pw_user:$pw_user" "$user_systemd/i2s-aec-init.service"
+    chown "$pw_user:$pw_user" "$user_systemd/i2s-audio-init.service"
 
     sudo -u "$pw_user" env \
         XDG_RUNTIME_DIR=/run/user/"$pw_uid" \
         DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/"$pw_uid"/bus \
-        systemctl --user enable i2s-aec-init.service 2>/dev/null || {
-        # Fallback: create symlink directly
+        systemctl --user enable i2s-audio-init.service 2>/dev/null || {
         mkdir -p "/home/$pw_user/.config/systemd/user/default.target.wants"
-        ln -sf "../i2s-aec-init.service" \
+        ln -sf "../i2s-audio-init.service" \
             "/home/$pw_user/.config/systemd/user/default.target.wants/" 2>/dev/null || true
         chown -R "$pw_user:$pw_user" "/home/$pw_user/.config/systemd"
     }
 
-    # Disable any leftover system-level services
+    # Clean up any leftover AEC services/configs from previous versions
+    systemctl disable i2s-aec-init.service 2>/dev/null || true
+    rm -f "/home/$pw_user/.config/systemd/user/i2s-aec-init.service" \
+          "/home/$pw_user/.config/systemd/user/default.target.wants/i2s-aec-init.service"
+    rm -f "/home/$pw_user/.config/pipewire/pipewire.conf.d/99-echo-cancel.conf"
+    rm -f /etc/asound.conf
+    # Clean up legacy system-level services
     systemctl disable i2s-audio-pipewire.service \
                       i2s-audio-wireplumber.service \
                       i2s-audio-aec-init.service 2>/dev/null || true
@@ -346,8 +299,7 @@ SVCEOF
 }
 
 install_i2s_pm_fix
-remove_asound_conf
-install_pipewire_aec
+install_pipewire_audio
 
 # Clean up legacy SD GPIO systemd service if present (now handled by the
 # max98357a driver via sdmode-gpios in the device tree overlay)
