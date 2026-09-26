@@ -19,6 +19,7 @@
         __overlay__ {
             max98357a: max98357a {
                 compatible = "maxim,max98357a";
+                sdmode-gpios = <&gpio3 7 0>; /* GPIO3_A7 = PIN_36, active-HIGH */
                 #sound-dai-cells = <0>;
                 status = "okay";
             };

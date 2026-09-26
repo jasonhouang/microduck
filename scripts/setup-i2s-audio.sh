@@ -177,6 +177,40 @@ else
     warn "/boot/armbianEnv.txt not found - you may need to manually configure boot overlay"
 fi
 
+install_i2s_pm_fix() {
+    # Prevent I2S3 runtime suspend — keeps it powered on to avoid click/pop
+    # noise at end of playback (rockchip-i2s-tdm PM resume is broken)
+    local rule_file="/etc/udev/rules.d/99-i2s-audio-pm.rules"
+    if [ -f "$rule_file" ]; then
+        say "I2S PM fix already installed"
+        return 0
+    fi
+    say "installing I2S PM fix (prevent runtime suspend)"
+    cat > "$rule_file" << 'EOF'
+# Keep I2S3 (fe430000.i2s) powered on at all times.
+# rockchip-i2s-tdm runtime PM resume causes click/pop noise.
+ACTION=="add", SUBSYSTEM=="platform", KERNEL=="fe430000.i2s", ATTR{power/control}="on"
+EOF
+    udevadm control --reload-rules 2>/dev/null || true
+    # Apply immediately for current session
+    local pm_path="/sys/devices/platform/fe430000.i2s/power/control"
+    if [ -f "$pm_path" ]; then
+        echo on > "$pm_path" || true
+    fi
+}
+
+install_i2s_pm_fix
+
+# Clean up legacy SD GPIO systemd service if present (now handled by the
+# max98357a driver via sdmode-gpios in the device tree overlay)
+if [ -f /etc/systemd/system/i2s-audio-sd-pin.service ]; then
+    systemctl stop i2s-audio-sd-pin.service 2>/dev/null || true
+    systemctl disable i2s-audio-sd-pin.service 2>/dev/null || true
+    rm -f /etc/systemd/system/i2s-audio-sd-pin.service
+    systemctl daemon-reload 2>/dev/null || true
+    say "removed legacy SD GPIO service (now in driver)"
+fi
+
 say "installation complete"
 echo ""
 echo "Next steps:"
