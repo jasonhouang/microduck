@@ -199,7 +199,41 @@ EOF
     fi
 }
 
+install_asound_conf() {
+    local conf="/etc/asound.conf"
+    if [ -f "$conf" ] && grep -q "mic_gain" "$conf"; then
+        say "asound.conf already configured"
+        return 0
+    fi
+    say "installing /etc/asound.conf (mic softvol + default routing)"
+    cat > "$conf" << 'EOF'
+# Software volume for INMP441 capture (low sensitivity, needs gain)
+pcm.mic_gain {
+    type softvol
+    slave.pcm "hw:i2saudio,0"
+    min_dB -10.0
+    max_dB  50.0
+    control {
+        name "Mic Capture Volume"
+        card 1
+    }
+}
+
+# Default: mic with gain, speaker direct
+pcm.!default {
+    type asym
+    playback.pcm "hw:i2saudio,1"
+    capture.pcm  "mic_gain"
+}
+EOF
+    # Set initial gain to 20 dB (130/255)
+    amixer -c 1 cset numid=12 130 >/dev/null 2>&1 || true
+    mkdir -p /var/lib/alsa
+    alsactl store -f /var/lib/alsa/asound.state 2>/dev/null || true
+}
+
 install_i2s_pm_fix
+install_asound_conf
 
 # Clean up legacy SD GPIO systemd service if present (now handled by the
 # max98357a driver via sdmode-gpios in the device tree overlay)
