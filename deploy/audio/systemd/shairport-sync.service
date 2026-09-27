@@ -1,0 +1,36 @@
+[Unit]
+Description=AirPlay receiver for robot speakers
+Documentation=https://github.com/mikebrady/shairport-sync
+After=network-online.target sound.target
+Wants=network-online.target
+
+# shairport-sync is an optional service — a robot without audio still
+# walks and updates. If it fails to start (no sound card, config error),
+# the rest of the robot keeps working.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/shairport-sync -c /etc/shairport-sync.conf
+Restart=on-failure
+RestartSec=5
+
+# Run as root for ALSA access — shairport-sync drops privileges internally
+# if configured, but on the robot we need direct hardware access.
+User=root
+Group=root
+
+# Logging — useful for debugging AirPlay connection issues
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=shairport-sync
+
+# Security hardening — shairport-sync needs network and audio, nothing else
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
