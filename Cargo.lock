@@ -4693,6 +4693,7 @@ dependencies = [
  "cc",
  "clap",
  "duck-ipc-proto",
+ "i2cdev",
  "libc",
  "linux-embedded-hal",
  "robotd-params",
