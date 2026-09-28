@@ -3,6 +3,20 @@
 Once per pad. After this, `padd.service` drives whatever pad is connected, from boot — nothing to
 start, and nothing that dies with your ssh session.
 
+## Xbox BLE controller driver
+
+Xbox Series X|S controllers use Bluetooth Low Energy (BLE). On Linux, they require the `xpadneo`
+driver, which is installed by `scripts/setup-board.sh`. If you are pairing an Xbox controller on a
+board that was not provisioned with the current `setup-board.sh`, install it first:
+
+```bash
+sudo sh scripts/setup-xpadneo.sh
+```
+
+Without `xpadneo`, the BLE connection succeeds but no input device is created — `bluetoothctl` shows
+`Connected: yes` yet `/dev/input/js*` does not exist. A reboot after installing `xpadneo` loads the
+module, and the pad then pairs and drives normally.
+
 ## Put the pad in pairing mode
 
 On an **Xbox** controller this is two presses, and the second is the one that goes wrong:
