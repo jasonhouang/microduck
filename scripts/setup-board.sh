@@ -658,8 +658,75 @@ configure_audio() {
         rm -rf "$dkms_tmp"
     }
 
+    # Xbox controller driver via DKMS. Same pattern as the audio codecs, but the source
+    # tree has subdirectories (src/xpadneo/) — the file list is flat here because
+    # fetch_repo_file takes a path relative to the repo root, and the destination
+    # directory structure is recreated by cp's target path.
+    install_xpadneo_dkms() {
+        local mod_name="hid-xpadneo"
+        local mod_dir="deploy/hid-xpadneo-dkms"
+        # Flat list of files relative to mod_dir; destinations preserve subdirectory structure.
+        local mod_files="dkms.conf src/Makefile
+            src/xpadneo/compat.h src/xpadneo/consumer.c src/xpadneo/core.c
+            src/xpadneo/debug.c src/xpadneo/device.c src/xpadneo/events.c
+            src/xpadneo/helpers.h src/xpadneo/keyboard.c src/xpadneo/mappings.c
+            src/xpadneo/mouse.c src/xpadneo/power.c src/xpadneo/quirks.c
+            src/xpadneo/rumble.c src/xpadneo/synthetic.c src/xpadneo/xpadneo.h"
+
+        local dkms_tmp
+        dkms_tmp=$(mktemp -d)
+        local dkms_ok=1
+        for f in $mod_files; do
+            fetch_repo_file "${mod_dir}/$f" "$dkms_tmp/$f" || { dkms_ok=0; break; }
+        done
+        if [ "$dkms_ok" != 1 ]; then
+            warn "could not fetch the $mod_name DKMS sources — xbox controller will not work"
+            rm -rf "$dkms_tmp"
+            return 1
+        fi
+        local dkms_ver
+        dkms_ver=$(sed -n 's/^PACKAGE_VERSION="\(.*\)"$/\1/p' "$dkms_tmp/dkms.conf")
+        local dkms_src="/usr/src/${mod_name}-${dkms_ver}"
+        local deploy_needed=0
+        for f in $mod_files; do
+            cmp -s "$dkms_tmp/$f" "$dkms_src/$f" || deploy_needed=1
+        done
+        if [ "$deploy_needed" = 1 ]; then
+            say "deploying $mod_name DKMS sources to $dkms_src"
+            dkms remove "${mod_name}/$dkms_ver" --all >/dev/null 2>&1 || true
+            mkdir -p "$dkms_src/src/xpadneo"
+            # Copy preserving directory structure
+            for f in $mod_files; do
+                mkdir -p "$dkms_src/$(dirname "$f")"
+                cp "$dkms_tmp/$f" "$dkms_src/$f"
+            done
+        fi
+        if dkms status "${mod_name}/$dkms_ver" 2>/dev/null | grep "$vendor_ver" | grep -q installed; then
+            say "$mod_name DKMS module already installed"
+        else
+            # Armbian ships the vendor headers without built host tools; DKMS needs modpost.
+            if [ -d "/usr/src/linux-headers-$vendor_ver" ] \
+                && [ ! -x "/usr/src/linux-headers-$vendor_ver/scripts/mod/modpost" ]; then
+                say "rebuilding the vendor headers' host tools (modpost)"
+                dpkg-reconfigure linux-headers-vendor-rk35xx >/dev/null 2>&1 || true
+            fi
+            say "building the $mod_name driver via DKMS (takes a minute)"
+            if dkms install "${mod_name}/$dkms_ver" -k "$vendor_ver"; then
+                say "$mod_name DKMS module installed for $vendor_ver"
+                needs_reboot=1
+            else
+                warn "DKMS build failed for $mod_name — xbox controller will not work"
+                warn "see /var/lib/dkms/${mod_name}/$dkms_ver/build/make.log"
+            fi
+        fi
+        rm -rf "$dkms_tmp"
+    }
+
     install_i2s_dkms "max98357a" "deploy/audio/max98357a-dkms" "dkms.conf Makefile max98357a.c"
     install_i2s_dkms "inmp441"   "deploy/audio/inmp441-dkms"       "dkms.conf Makefile inmp441.c"
+
+    # Xbox controller driver (optional — skip if fetch fails, unlike audio which is core)
+    install_xpadneo_dkms || warn "xpadneo installation skipped"
 
     # 5. I2S audio setup. Fetches and runs the full I2S audio setup script which
     #    installs PipeWire, configures the pro-audio profile, sets mic gain, and
