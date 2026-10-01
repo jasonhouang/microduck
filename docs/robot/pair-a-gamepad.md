@@ -63,6 +63,20 @@ robot prefers one in pairing mode; both stay paired afterwards and `padd` drives
 The cost is that re-running with nothing new in pairing mode waits out the whole search window
 before reporting the pad you already have — `--timeout 5` if you are only repairing trust.
 
+**If the light keeps flashing after pairing.** On an Xbox pad, `pad pair` completes the BLE bond
+but the HID connection may not follow — `bluetoothctl info` shows `Connected: yes` yet
+`/dev/input/js*` does not exist and the pad's light keeps flashing quickly. Reconnect the Bluetooth
+link by hand:
+
+```bash
+sudo bluetoothctl disconnect <pad-address>
+sudo bluetoothctl connect <pad-address>
+```
+
+The xpadneo driver then loads, `/dev/input/js0` appears, and the light goes solid or off. This is
+a BlueZ quirk on reconnects to a pad the board already knows; a fresh pair from a board that never
+saw the pad does not hit it.
+
 ## Check it
 
 ```bash
