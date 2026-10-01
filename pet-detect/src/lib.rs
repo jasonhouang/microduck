@@ -210,9 +210,20 @@ fn resample_linear(input: &[f32], sr_in: usize, sr_out: usize) -> Vec<f32> {
     out
 }
 
+/// Sound type detected by the multi-class model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SoundType {
+    /// Background/normal sound (class 0)
+    Normal,
+    /// Quacking sound (class 1)
+    Quack,
+    /// Crying sound (class 2)
+    Cry,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PettingEvent {
-    Start,
+    Start(SoundType),
     End,
 }
 
@@ -320,13 +331,44 @@ impl PettingDetector {
             let input = Tensor::from_array(([1usize, 1, N_MELS, WINDOW_FRAMES], mel))?;
             let outputs = self.session.run(ort::inputs![input])?;
             let (_shape, probs) = outputs[0].try_extract_tensor::<f32>()?;
-            let p = probs[1];
-            last_p = Some(p);
 
-            if !self.is_petting && p >= self.enter_threshold {
+            // Multi-class: find the class with highest probability
+            let mut max_idx = 0;
+            let mut max_prob = probs[0];
+            for i in 1..probs.len() {
+                if probs[i] > max_prob {
+                    max_prob = probs[i];
+                    max_idx = i;
+                }
+            }
+
+            // Determine sound type from class index
+            let sound_type = match max_idx {
+                0 => SoundType::Normal,
+                1 => SoundType::Quack,
+                2 => SoundType::Cry,
+                _ => SoundType::Normal,
+            };
+
+            // Debug: log probabilities every inference
+            tracing::info!(normal = probs[0], quack = probs[1], cry = probs[2], max_idx, "model output");
+
+            last_p = Some(max_prob);
+
+            // Enter detection if any non-normal sound exceeds threshold
+            tracing::info!(
+                is_petting = self.is_petting,
+                max_prob,
+                threshold = self.enter_threshold,
+                ?sound_type,
+                "checking event conditions"
+            );
+            if !self.is_petting && max_prob >= self.enter_threshold && sound_type != SoundType::Normal {
+                tracing::info!(?sound_type, max_prob, "triggering start event");
                 self.is_petting = true;
-                events.push(PettingEvent::Start);
-            } else if self.is_petting && p < self.exit_threshold {
+                events.push(PettingEvent::Start(sound_type));
+            } else if self.is_petting && max_prob < self.exit_threshold {
+                tracing::info!("triggering end event");
                 self.is_petting = false;
                 events.push(PettingEvent::End);
             }

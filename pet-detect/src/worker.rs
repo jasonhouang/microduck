@@ -369,7 +369,7 @@ fn spawn_arecord(device: &str) -> Result<Child> {
             "-D", device, "-f", "S16_LE", "-r", "16000", "-c", "1", "-t", "raw",
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())  // Changed from null to inherit for debugging
         .spawn()?)
 }
 

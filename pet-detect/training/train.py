@@ -68,7 +68,7 @@ def load_class(label_dir: Path, label: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 class TinyAudioCNN(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, num_classes: int = 3) -> None:
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(1, 8, kernel_size=3, padding=1),
@@ -80,7 +80,7 @@ class TinyAudioCNN(nn.Module):
             nn.ReLU(),
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
-            nn.Linear(16, 2),
+            nn.Linear(16, num_classes),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -93,10 +93,12 @@ def main() -> None:
         raise SystemExit(f"missing {FEATURES_BIN} — run `cargo build --release -p pet-detect --bin pet-features` first")
 
     print("Extracting features...")
+    # Multi-class: 0=normal, 1=quack, 2=cry
     Xn, yn = load_class(DATA / "normal", 0)
-    Xp, yp = load_class(DATA / "petting", 1)
-    X = np.concatenate([Xn, Xp], axis=0)[:, None, :, :]  # add channel dim
-    y = np.concatenate([yn, yp], axis=0)
+    Xq, yq = load_class(DATA / "petting", 1)  # petting dir has quack samples
+    Xc, yc = load_class(DATA / "cry", 2)
+    X = np.concatenate([Xn, Xq, Xc], axis=0)[:, None, :, :]  # add channel dim
+    y = np.concatenate([yn, yq, yc], axis=0)
 
     # Per-dataset mean/std normalization. Stored in the ONNX as a Sub/Div is overkill;
     # since features.rs and detect.rs share lib.rs, we normalize inside training only —

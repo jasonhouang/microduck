@@ -920,6 +920,14 @@ impl RobotState {
     }
 }
 
+/// Check if AirPlay (shairport-sync) is actively streaming audio.
+/// Returns true if AirPlay has higher priority and we should not play sounds.
+fn airplay_is_active() -> bool {
+    // shairport-sync's session_start hook creates this file when a client connects,
+    // and session_end removes it when the client disconnects.
+    std::path::Path::new("/run/airplay-active").exists()
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     // Rust ignores SIGPIPE, which turns `robotd ... | head` into a panic.
@@ -1950,6 +1958,11 @@ async fn control_loop<T: RobotIo>(
         None
     };
 
+    // Cooldown for crying detection to avoid feedback loop when the duck song is playing
+    // Initialize to the past so the cooldown is not active at startup
+    let mut last_cry_detection = std::time::Instant::now() - std::time::Duration::from_secs(60);
+    const CRY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(60); // 1 minute
+
     // The theremin. `[theremin] enabled` is off by default, so on most ducks this is `None`
     // and nothing here subscribes to depth at all — `tofd` keeps its own counsel, and
     // `robotctl monitor` is unaffected either way, since it subscribes to `tofd` itself.
@@ -2227,20 +2240,66 @@ async fn control_loop<T: RobotIo>(
                 voice.play(tag.as_str(), false);
             }
 
+            // AirPlay priority: if AirPlay becomes active, stop any playing duck sounds
+            // so AirPlay can use the audio device without conflict
+            if airplay_is_active() {
+                // Stop any currently playing robot sounds to yield to AirPlay
+                voice.stop();
+                tracing::debug!("AirPlay active — stopped robot sounds");
+            }
+
             // Petting: coo, exactly when the prototype coos — not fallen, no scripted move
             // in flight. The verdict is used bare here (not the armed fall gate): this is a
             // sound cue, and cooing while face-down would be worse than staying quiet.
             if let Some(pet) = pet.as_ref() {
                 while let Some(ev) = pet.try_recv_event() {
+                    tracing::info!(event = ?ev, "received pet event");
                     match ev {
-                        pet_detect::PettingEvent::Start => {
+                        pet_detect::PettingEvent::Start(sound_type) => {
                             let calm =
                                 !safety.fallen() && controller.as_ref().is_none_or(|c| !c.busy());
-                            if calm {
-                                tracing::info!("petting started");
-                                voice.play("coo", false);
-                            } else {
-                                tracing::debug!("petting detected (ignored: busy or down)");
+                            tracing::info!(?sound_type, calm, "checking quack/cry conditions");
+                            if !calm {
+                                tracing::debug!("sound detected (ignored: busy or down)");
+                                continue;
+                            }
+                            match sound_type {
+                                pet_detect::SoundType::Quack => {
+                                    // Don't interrupt the ducks-song if it's playing (during cooldown)
+                                    let music_playing = last_cry_detection.elapsed() < CRY_COOLDOWN;
+                                    let airplay_active = airplay_is_active();
+                                    if music_playing || airplay_active {
+                                        if airplay_active {
+                                            tracing::debug!("quack detected (ignored: AirPlay active)");
+                                        } else {
+                                            tracing::debug!("quack detected (ignored: music playing)");
+                                        }
+                                        continue;
+                                    }
+                                    // Cycle through response sounds
+                                    static QUACK_RESPONSES: &[&str] = &["chirp", "coo", "greet", "inquire", "wheee"];
+                                    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+                                    let idx = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % QUACK_RESPONSES.len();
+                                    let chosen = QUACK_RESPONSES[idx];
+                                    tracing::info!(sound = chosen, "quack detected — playing response");
+                                    voice.play(chosen, false);
+                                }
+                                pet_detect::SoundType::Cry => {
+                                    let cooldown_ok = last_cry_detection.elapsed() > CRY_COOLDOWN;
+                                    let airplay_active = airplay_is_active();
+                                    if cooldown_ok && !airplay_active {
+                                        tracing::info!("crying detected — playing ducks song");
+                                        voice.play("ducks-song", false);
+                                        last_cry_detection = std::time::Instant::now();
+                                    } else if airplay_active {
+                                        tracing::debug!("crying detected (ignored: AirPlay active)");
+                                    } else {
+                                        tracing::debug!("crying detected (ignored: cooldown)");
+                                    }
+                                }
+                                pet_detect::SoundType::Normal => {
+                                    // Normal sound, no response needed
+                                }
                             }
                         }
                         pet_detect::PettingEvent::End => tracing::debug!("petting ended"),
