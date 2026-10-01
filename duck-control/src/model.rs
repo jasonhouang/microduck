@@ -11,7 +11,7 @@
 /// Left leg (5) · neck/head/mouth (5) · right leg (5).
 pub const NUM_JOINTS: usize = 15;
 
-/// Dynamixel IDs, indexed as [`JOINT_NAMES`].
+/// Dynamixel/Feetech IDs, indexed as [`JOINT_NAMES`].
 pub const JOINT_IDS: [u8; NUM_JOINTS] = [
     20, 21, 22, 23, 24, // left leg
     30, 31, 32, 33, 34, // neck, head, mouth
@@ -73,36 +73,27 @@ pub fn mouth_target(open: f64) -> f64 {
     MOUTH_CLOSED + open * (MOUTH_OPEN - MOUTH_CLOSED)
 }
 
-/// The `imu_to_dxl` v2 board's Dynamixel ID. It rides the motor bus and is read in the
-/// same transaction as the servos ([`crate::bus`]).
-pub const IMU_DXL_ID: u8 = 200;
-
+/// Feetech HD1910 baud rate: 1 Mbps (index 0).
 pub const BAUD_RATE: u32 = 1_000_000;
 
-/// What a servo answers as out of the box: ID 1 at 57 600 baud. Both are deliberately unused
-/// on this bus — no joint is ID 1 and nothing runs at that speed — which is what lets a
+/// What a servo answers as out of the box: ID 1 at 1 Mbps (baud index 0).
+/// ID 1 is deliberately unused on this bus — no joint is ID 1 — which is what lets a
 /// replacement be told apart from every servo already fitted ([`crate::bus`]).
 pub const FACTORY_ID: u8 = 1;
-pub const FACTORY_BAUD_RATE: u32 = 57_600;
+pub const FACTORY_BAUD_RATE: u32 = 1_000_000;
 
-/// EEPROM registers asserted (and corrected) at startup.
+/// HD1910 baud register value for [`BAUD_RATE`].
+pub const FACTORY_BAUD_INDEX: u8 = 0;
+
+/// EPROM registers asserted (and corrected) at startup on HD1910 servos.
 ///
-/// `return_delay_time` is the load-bearing one: the XL330 ships at 250, which is 500 µs of
-/// turnaround *per device*. Across 16 devices that is 8 ms per tick — 40% of a 20 ms budget
-/// — spent waiting for servos to get around to answering. The rest are here because the
-/// runtime found them worth pinning.
-///
-/// `shutdown = 52` is `0b110100` — overload, electrical shock, overheating — with the
-/// input-voltage bit **clear**, where the factory's 53 sets it. That bit is what clears torque
-/// once the supply passes the servo's `Max Voltage Limit`, which nothing here writes and which
-/// therefore stays at its default 7.0 V. A charged 2S pack sits above that, so the clear bit is
-/// the reason fifteen servos do not latch themselves off a fully charged battery. Read as
-/// "latches on input-voltage faults" it says the opposite of what it does.
+/// `baud` = 0 means 1 Mbps, matching [`BAUD_RATE`].
+/// `resp-level` = 1: all instructions get an ack, so a missing reply is a real fault.
+/// `unload-cond` = 7: voltage + encoder + overheat protection enabled (BIT0|BIT1|BIT2).
 pub const EXPECTED_REGISTERS: &[(&str, u8)] = &[
-    ("return_delay_time", 0),
-    ("baud_rate", 3), // 3 = 1 Mbps, must agree with BAUD_RATE
-    ("pwm_slope", 255),
-    ("shutdown", 52),
+    ("baud", 0),          // 0 = 1 Mbps
+    ("resp-level", 1),    // ack everything
+    ("unload-cond", 7),   // voltage + encoder + overheat
 ];
 
 /// Index of a joint by name. Linear scan over 15 entries, used at startup and in tests.
@@ -113,7 +104,7 @@ pub fn joint_index(name: &str) -> Option<usize> {
 // ── battery ──────────────────────────────────────────────────────────────────
 //
 // There is no fuel gauge and no ADC. The only measurement available is what the servos
-// report as their own supply (`crate::bus::DynamixelIo::bus_voltage`), which is the pack
+// report as their own supply (`crate::bus::FeetechIo::slow_sensors`), which is the pack
 // seen through the bus — so it sags under load and recovers when the robot stands still.
 // That is why the span below is *usable-under-load*, not the cell chemistry's range.
 //
@@ -170,43 +161,11 @@ mod tests {
             .for_each(|w| assert_ne!(w[0], w[1], "duplicate Dynamixel ID {}", w[0]));
     }
 
-    /// The IMU board shares the bus with the servos, so its ID must not collide with one.
-    #[test]
-    fn imu_id_does_not_collide_with_a_joint() {
-        assert!(!JOINT_IDS.contains(&IMU_DXL_ID));
-    }
-
     /// The replacement path finds a new servo by the ID it ships with. If a joint ever took
-    /// ID 1, a fresh servo would be indistinguishable from it — and flashing "the missing
-    /// joint" onto ID 1 would re-address a servo that was never missing.
+    /// ID 1, a fresh servo would be indistinguishable from it.
     #[test]
     fn factory_defaults_are_unused_on_the_bus() {
         assert!(!JOINT_IDS.contains(&FACTORY_ID));
-        assert_ne!(IMU_DXL_ID, FACTORY_ID);
-        assert_ne!(FACTORY_BAUD_RATE, BAUD_RATE);
-    }
-
-    /// `shutdown` is the one register whose *bits* are the decision rather than the number:
-    /// the input-voltage bit is cleared on purpose, and that is what lets the pack's range run
-    /// across a servo rated to 6.0 V. The factory default is 53 — one bit away — so a later
-    /// edit that "restores the default" should meet a test rather than a comment.
-    #[test]
-    fn the_shutdown_mask_clears_the_input_voltage_bit() {
-        let want = EXPECTED_REGISTERS
-            .iter()
-            .find(|(n, _)| *n == "shutdown")
-            .map(|&(_, v)| v)
-            .expect("shutdown is an expected register");
-        const OVERLOAD: u8 = 1 << 5;
-        const ELECTRICAL_SHOCK: u8 = 1 << 4;
-        const OVERHEATING: u8 = 1 << 2;
-        const INPUT_VOLTAGE: u8 = 1 << 0;
-        assert_eq!(
-            want,
-            OVERLOAD | ELECTRICAL_SHOCK | OVERHEATING,
-            "the three faults worth latching on, with input-voltage clear"
-        );
-        assert_eq!(want & INPUT_VOLTAGE, 0);
     }
 
     /// `MOUTH_INDEX` is used to skip a slot when mapping 14 policy actions onto 15 joints.

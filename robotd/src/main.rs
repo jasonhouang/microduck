@@ -1180,7 +1180,7 @@ fn spawn_control_thread(
 
 /// The real bus on the board; a fake elsewhere, so `open_bus_waiting` has one signature.
 #[cfg(target_os = "linux")]
-type BusIo = duck_control::bus::DynamixelIo;
+type BusIo = duck_control::bus::FeetechIo;
 #[cfg(not(target_os = "linux"))]
 type BusIo = FakeIo;
 
@@ -1222,7 +1222,7 @@ fn open_bus(bus: &params::Bus, attempt: u32) -> Option<BusIo> {
     let loud = attempt == 0 || attempt.is_multiple_of(STARTUP_READ_LOG_EVERY);
     let port = bus.port.as_str();
 
-    let mut io = match duck_control::bus::DynamixelIo::open(port, bus.fast_sync_read) {
+    let mut io = match duck_control::bus::FeetechIo::open(port) {
         Ok(io) => io,
         Err(e) => {
             if loud {
@@ -1231,12 +1231,6 @@ fn open_bus(bus: &params::Bus, attempt: u32) -> Option<BusIo> {
             return None;
         }
     };
-    // Under the same `loud` rule as everything else here — a board waiting on servo power
-    // retries this forever. Worth saying at all because the whole tick budget hangs off it,
-    // and "turned off in robotd.toml" is otherwise indistinguishable from "this board is slow".
-    if !bus.fast_sync_read && loud {
-        tracing::warn!("bus.fast_sync_read is off; every sync read is a plain one");
-    }
     if !adopt_missing_servo(&mut io, loud) {
         return None;
     }
@@ -1303,7 +1297,7 @@ fn adopt_missing_servo(io: &mut BusIo, loud: bool) -> bool {
             if loud {
                 tracing::error!(
                     id,
-                    "servo missing and nothing answers at factory defaults (id 1, 57600 baud); \
+                    "servo missing and nothing answers at factory defaults (id 1, 1 Mbps); \
                      is it plugged in? waiting"
                 );
             }
@@ -1382,7 +1376,7 @@ enum Bringup {
 impl Bringup {
     /// The interpolated target for this tick, or `None` once the ramp is done.
     ///
-    /// Linear, like `DynamixelIo::interpolate_to` which `robotd init` uses — same shape, except this
+    /// Linear, like `FeetechIo::interpolate_to` which `robotd init` uses — same shape, except this
     /// one is computed per tick instead of blocking the thread, because here the loop is running.
     fn homing_target(&self, now: Instant) -> Option<[f64; NUM_JOINTS]> {
         let Bringup::Homing { from, since } = self else {
