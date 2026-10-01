@@ -233,6 +233,12 @@ impl Sound {
 
     /// Stop whatever is on the PCM, now. The ride's abrupt exit, and what every one-shot
     /// does to its predecessor.
+    pub fn stop(&mut self) {
+        self.stop_child();
+    }
+
+    /// Stop whatever is on the PCM, now. The ride's abrupt exit, and what every one-shot
+    /// does to its predecessor.
     fn stop_child(&mut self) {
         self.wheee_held.store(false, Ordering::Relaxed);
         // A theremin writer blocked in `write_all` on a pipe whose reader is about to die
