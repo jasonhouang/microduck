@@ -9,6 +9,7 @@
 
 pub mod bus;
 pub mod fall;
+pub mod feetech;
 pub mod imu;
 pub mod io;
 pub mod model;
