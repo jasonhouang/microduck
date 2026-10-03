@@ -24,6 +24,10 @@ port = "/dev/ttyS2"
 # (Feetech HD1910: FT-SCS protocol has no fast sync read; the setting is retained
 # for config compatibility but no longer used.)
 
+# I²C bus for the body IMU (LSM6DSV16X). Set to the Radxa's I²C device node;
+# empty or a missing device disables the body IMU gracefully.
+body_imu_bus = "/dev/i2c-3"
+
 # Every value below that is commented out shows the built-in default. LEAVE IT COMMENTED
 # unless this robot genuinely needs a different value: install.sh copies this file to
 # /etc/robot/robotd.toml once and never overwrites it, so an uncommented value is frozen on

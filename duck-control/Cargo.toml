@@ -37,5 +37,10 @@ ort = { version = "=2.0.0-rc.11", default-features = false, features = ["load-dy
 # not have, so leaving it on breaks the aarch64 build outright.
 serialport = { version = "4.8", default-features = false }
 
+# Body IMU over I²C — Linux-only, the same rule `tof` applies for the head IMU.
+# Off Linux `duck-control` still builds and runs every test against `FakeIo`.
+[target.'cfg(target_os = "linux")'.dependencies]
+i2cdev = "0.6"
+
 [dev-dependencies]
 serde_json.workspace = true
