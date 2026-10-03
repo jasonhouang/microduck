@@ -73,14 +73,9 @@ impl Default for SflpDecoder {
 }
 
 impl SflpDecoder {
-    /// The board is mounted so that trunk = `[+raw_z, +raw_y, −raw_x]`, a +90° rotation
-    /// about Y.
-    pub const DEFAULT_MOUNT: [f64; 4] = [
-        std::f64::consts::FRAC_1_SQRT_2,
-        0.0,
-        std::f64::consts::FRAC_1_SQRT_2,
-        0.0,
-    ];
+    /// The body IMU (LSM6DSV16X on i2c-4) is mounted with its coordinate frame aligned
+    /// to the trunk frame — no rotation correction needed.
+    pub const DEFAULT_MOUNT: [f64; 4] = [1.0, 0.0, 0.0, 0.0];
 
     pub fn new(mount: [f64; 4]) -> Self {
         Self {

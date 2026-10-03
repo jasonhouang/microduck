@@ -2,9 +2,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ServoError {
-    #[error("serial port: {0}")]
-    Serial(#[from] serialport::Error),
-
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
