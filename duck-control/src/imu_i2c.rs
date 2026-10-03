@@ -44,8 +44,9 @@ const EMB_FUNC_EN_A: u8 = 0x04;
 const EMB_FUNC_FIFO_EN_A: u8 = 0x44;
 const SFLP_ODR: u8 = 0x5E;
 
-/// SFLP game rotation vector FIFO tag.
-const SFLP_GAME_TAG: u8 = 0x13;
+/// SFLP game rotation vector FIFO tag (verified on-chip; the ST C driver header
+/// has this wrong — it says 0x13 but the chip emits 0x17 for game rotation).
+const SFLP_GAME_TAG: u8 = 0x17;
 
 /// One FIFO entry: 1 tag + 6 data bytes.
 const FIFO_ENTRY_LEN: usize = 7;
@@ -55,6 +56,34 @@ const SFLP_STARTUP: Duration = Duration::from_millis(300);
 
 /// Sensor sample rate — both accel/gyro and SFLP.
 const ODR_HZ: u8 = 0x04; // 30 Hz
+
+/// Encode an f32 as IEEE 754 half-precision (2 bytes, little-endian).
+fn f32_to_f16(v: f64) -> [u8; 2] {
+    let bits = v as f32;
+    let f = bits.to_bits();
+    let sign = ((f >> 16) & 0x8000) as u16;
+    let exp = ((f >> 23) & 0xFF) as i32;
+    let mant = f & 0x007F_FFFF;
+
+    let h = if exp == 0 && mant == 0 {
+        sign // zero
+    } else if exp == 0xFF {
+        // inf / NaN
+        sign | 0x7C00 | if mant != 0 { 0x0200 } else { 0 }
+    } else {
+        let new_exp = exp - 127 + 15;
+        if new_exp >= 31 {
+            sign | 0x7C00 // overflow → inf
+        } else if new_exp <= 0 {
+            // subnormal
+            let shift = 14 - new_exp;
+            sign | (((mant | 0x0080_0000) >> (shift + 13)) as u16)
+        } else {
+            sign | ((new_exp as u16) << 10) | ((mant >> 13) as u16)
+        }
+    };
+    h.to_le_bytes()
+}
 
 pub struct Lsm6dsv16x {
     dev: LinuxI2CDevice,
@@ -137,25 +166,41 @@ impl Lsm6dsv16x {
     /// Read one sample: SFLP quaternion from the FIFO, raw gyro from the output registers.
     /// Returns `None` if the FIFO has no complete entry yet.
     pub fn read(&mut self) -> Option<ImuData> {
-        // Check FIFO level (9 bits across STATUS1 + STATUS2 bit 0).
-        let lo = self.dev.smbus_read_byte_data(FIFO_STATUS1).ok()?;
-        let hi = self.dev.smbus_read_byte_data(FIFO_STATUS2).ok()?;
-        let level = ((hi as u16 & 0x01) << 8) | lo as u16;
-        if level < FIFO_ENTRY_LEN as u16 {
-            return None;
-        }
-
-        // Read FIFO entry: tag (1 byte) + data (6 bytes).
-        // i2cdev's `read` has no register argument; write the address first.
+        // Drain non-game-rotation entries until we find the SFLP tag or exhaust the FIFO.
         let mut fifo = [0u8; FIFO_ENTRY_LEN];
-        if self.dev.write(&[FIFO_DATA_OUT_TAG]).is_err()
-            || self.dev.read(&mut fifo).is_err()
-        {
-            return None;
+        loop {
+            let lo = self.dev.smbus_read_byte_data(FIFO_STATUS1).ok()?;
+            let hi = self.dev.smbus_read_byte_data(FIFO_STATUS2).ok()?;
+            let level = ((hi as u16 & 0x01) << 8) | lo as u16;
+            if level < FIFO_ENTRY_LEN as u16 {
+                return None;
+            }
+            if self.dev.write(&[FIFO_DATA_OUT_TAG]).is_err()
+                || self.dev.read(&mut fifo).is_err()
+            {
+                return None;
+            }
+            if fifo[0] == SFLP_GAME_TAG {
+                break;
+            }
         }
 
-        let tag = fifo[0];
-        let quat_bytes = &fifo[1..7];
+        // The 0x17 payload is a rotation vector: 3 × i16 LE, scale 2⁻¹⁵ rad/LSB.
+        // Convert to a unit quaternion, then encode (Qx, Qy, Qz) as IEEE half-floats
+        // for the SflpDecoder which expects that format.
+        let rotvec_bytes = &fifo[1..7];
+        let rx = i16::from_le_bytes([rotvec_bytes[0], rotvec_bytes[1]]) as f64 / 32768.0;
+        let ry = i16::from_le_bytes([rotvec_bytes[2], rotvec_bytes[3]]) as f64 / 32768.0;
+        let rz = i16::from_le_bytes([rotvec_bytes[4], rotvec_bytes[5]]) as f64 / 32768.0;
+
+        let angle = (rx * rx + ry * ry + rz * rz).sqrt();
+        let (qw, qx, qy, qz) = if angle < 1e-9 {
+            (1.0, 0.0, 0.0, 0.0)
+        } else {
+            let half = angle * 0.5;
+            let sinc_half = half.sin() / angle;
+            (half.cos(), rx * sinc_half, ry * sinc_half, rz * sinc_half)
+        };
 
         // Read raw gyro (6 bytes from OUT_GYRO_X_L).
         let mut gyro = [0u8; 6];
@@ -165,16 +210,13 @@ impl Lsm6dsv16x {
             return None;
         }
 
-        if tag != SFLP_GAME_TAG {
-            // Unexpected tag — skip this entry by returning None.
-            return None;
-        }
-
         // Build the 12-byte block the decoder expects:
         // [gyro_x(2), gyro_y(2), gyro_z(2), quat_x(2), quat_y(2), quat_z(2)]
         let mut block = [0u8; 12];
         block[..6].copy_from_slice(&gyro);
-        block[6..12].copy_from_slice(quat_bytes);
+        block[6..8].copy_from_slice(&f32_to_f16(qx));
+        block[8..10].copy_from_slice(&f32_to_f16(qy));
+        block[10..12].copy_from_slice(&f32_to_f16(qz));
 
         let data = self.decoder.decode(&block);
         if self.decoder.ready() {
