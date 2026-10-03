@@ -16,21 +16,13 @@
 # is far easier to diagnose remotely than a daemon that will not run.
 
 [bus]
-# Serial port the 15 servos and the imu_to_dxl board share. /dev/ttyS2 is the Radxa
-# Zero 3W's wiring; a board wired differently can also be overridden per-invocation with
+# Serial port the 15 servos are wired to. /dev/ttyS2 is the Radxa Zero 3W's
+# wiring; a board wired differently can also be overridden per-invocation with
 # `robotd --port`, which is the dev escape hatch rather than the thing to edit here.
 port = "/dev/ttyS2"
 
-# Read the bus with fast sync read (protocol 2.0 instruction 0x8A) instead of a plain sync
-# read. The 16 devices append their answers to one status packet rather than each sending
-# its own, so the bus turns around once per tick instead of 16 times.
-#
-# Turn it OFF for a board whose firmware predates the instruction: XL330 needs v46 or newer,
-# and the imu_to_dxl board has to implement it too. There is no half-working version of
-# getting this wrong — a device that does not implement 0x8A does not answer, so every read
-# fails and the journal fills with `bus read failed`. That is the symptom to match against
-# this line. Needs a robotd restart.
-# fast_sync_read = true
+# (Feetech HD1910: FT-SCS protocol has no fast sync read; the setting is retained
+# for config compatibility but no longer used.)
 
 # Every value below that is commented out shows the built-in default. LEAVE IT COMMENTED
 # unless this robot genuinely needs a different value: install.sh copies this file to
