@@ -18,6 +18,9 @@ use crate::model::{
     JOINT_NAMES, NUM_JOINTS,
 };
 
+#[cfg(target_os = "linux")]
+use crate::imu_i2c::Lsm6dsv16x;
+
 /// 0.087 degrees per unit → radians per unit.
 const RAD_PER_UNIT: f64 = 0.087 * PI / 180.0;
 
@@ -54,17 +57,32 @@ fn raw_vel_to_rad_per_sec(raw: i64) -> f64 {
 
 pub struct FeetechIo {
     servo: Servo,
+    #[cfg(target_os = "linux")]
+    imu: Option<Lsm6dsv16x>,
 }
 
 impl FeetechIo {
-    pub fn open(port: &str) -> Result<Self> {
-        let servo = Servo::connect(port, BAUD_RATE, READ_TIMEOUT.as_millis() as u64, false, false)
+    pub fn open(port: &str, imu_bus: Option<&str>) -> Result<Self> {
+        let servo = Servo::connect(port, BAUD_RATE, READ_TIMEOUT.as_millis() as u64, true, false)
             .map_err(|e| IoError::Port {
                 path: port.to_owned(),
                 source: std::io::Error::other(std::io::Error::other(e.to_string())),
             })?;
+        #[cfg(target_os = "linux")]
+        let imu = match imu_bus {
+            Some(bus) => match Lsm6dsv16x::open(bus) {
+                Ok(imu) => Some(imu),
+                Err(e) => {
+                    tracing::warn!(error = %e, bus, "body IMU not available");
+                    None
+                }
+            },
+            None => None,
+        };
         Ok(Self {
             servo,
+            #[cfg(target_os = "linux")]
+            imu,
         })
     }
 
@@ -226,33 +244,41 @@ pub fn replacement_target(missing: &[u8]) -> Option<u8> {
 }
 
 impl RobotIo for FeetechIo {
-    /// Read position, velocity and current for every joint. No IMU — it is not on this bus.
+    /// Read position, velocity and load for every joint, plus body IMU orientation when fitted.
+    ///
+    /// One 6-byte read per servo (addresses 56–61: pos, vel, load are contiguous).
+    /// 15 servos × 1 transaction = 15 transactions per tick, vs 45 if read separately.
     fn read(&mut self) -> Result<Sensors> {
         let mut sensors = Sensors::default();
 
-        // Read pos (56, 2 bytes), vel (58, 2 bytes), current (69, 2 bytes) per servo.
-        // A focused 2-byte read is cheaper than the full 15-byte feedback block.
-        let pos_reg = registers::find_register("pos").unwrap();
-        let vel_reg = registers::find_register("vel").unwrap();
-        let cur_reg = registers::find_register("current").unwrap();
-
         for (i, &id) in JOINT_IDS.iter().enumerate() {
-            let raw_pos = self
+            let raw = self
                 .servo
-                .read_reg(id, pos_reg)
-                .map_err(|e| IoError::Bus(format!("read pos on {id}: {e}")))?;
-            let raw_vel = self
-                .servo
-                .read_reg(id, vel_reg)
-                .map_err(|e| IoError::Bus(format!("read vel on {id}: {e}")))?;
-            let raw_cur = self
-                .servo
-                .read_reg(id, cur_reg)
-                .map_err(|e| IoError::Bus(format!("read current on {id}: {e}")))?;
+                .read(id, 56, 6)
+                .map_err(|e| IoError::Bus(format!("read feedback on {id}: {e}")))?;
+            if raw.len() < 6 {
+                return Err(IoError::ShortRead {
+                    what: "motor feedback",
+                    expected: 6,
+                    got: raw.len(),
+                });
+            }
+            let u16le = |o: usize| u16::from_le_bytes([raw[o], raw[o + 1]]);
+            let raw_pos = registers::decode_value(u16le(0), Some(15));
+            let raw_vel = registers::decode_value(u16le(2), Some(15));
+            let raw_load = registers::decode_value(u16le(4), Some(10));
 
             sensors.positions[i] = raw_to_radians(raw_pos);
             sensors.velocities[i] = raw_vel_to_rad_per_sec(raw_vel);
-            sensors.currents_ma[i] = (raw_cur as f64 * MA_PER_UNIT).abs();
+            // Load is duty-cycle %, take magnitude like the old bus did for current.
+            sensors.currents_ma[i] = raw_load.abs() as f64 * 10.0; // 0.1% per unit → ~mA proxy
+        }
+
+        #[cfg(target_os = "linux")]
+        if let Some(imu) = self.imu.as_mut() {
+            if let Some(data) = imu.read() {
+                sensors.imu = data;
+            }
         }
 
         Ok(sensors)
@@ -344,13 +370,22 @@ impl RobotIo for FeetechIo {
         })
     }
 
-    // No IMU on this bus.
+    // Body IMU: reports real state when fitted, defaults otherwise.
     fn imu_stale(&self) -> ImuStale {
+        #[cfg(target_os = "linux")]
+        if let Some(imu) = self.imu.as_ref() {
+            return imu.stale();
+        }
         ImuStale::default()
     }
 
     fn imu_ready(&self) -> bool {
-        true
+        #[cfg(target_os = "linux")]
+        if let Some(imu) = self.imu.as_ref() {
+            return imu.ready();
+        }
+        // No IMU fitted — fall detection is gated on this elsewhere.
+        false
     }
 }
 

@@ -1222,7 +1222,12 @@ fn open_bus(bus: &params::Bus, attempt: u32) -> Option<BusIo> {
     let loud = attempt == 0 || attempt.is_multiple_of(STARTUP_READ_LOG_EVERY);
     let port = bus.port.as_str();
 
-    let mut io = match duck_control::bus::FeetechIo::open(port) {
+    let imu_bus = if bus.body_imu_bus.is_empty() {
+        None
+    } else {
+        Some(bus.body_imu_bus.as_str())
+    };
+    let mut io = match duck_control::bus::FeetechIo::open(port, imu_bus) {
         Ok(io) => io,
         Err(e) => {
             if loud {

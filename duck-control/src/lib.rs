@@ -11,6 +11,8 @@ pub mod bus;
 pub mod fall;
 pub mod feetech;
 pub mod imu;
+#[cfg(target_os = "linux")]
+pub mod imu_i2c;
 pub mod io;
 pub mod model;
 pub mod obs;

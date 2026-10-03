@@ -1802,6 +1802,8 @@ pub struct Bus {
     /// the bus drops, `update_gate` sees an unhealthy robot, and a release that turned this on
     /// against firmware that cannot do it is rolled back on its own.
     pub fast_sync_read: bool,
+    /// I²C bus for the body IMU (LSM6DSV16X), e.g. `/dev/i2c-3`. Empty disables it.
+    pub body_imu_bus: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1872,6 +1874,7 @@ impl Default for Bus {
         Self {
             port: "/dev/ttyS2".into(),
             fast_sync_read: true,
+            body_imu_bus: "/dev/i2c-3".into(),
         }
     }
 }

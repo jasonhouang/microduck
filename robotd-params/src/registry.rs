@@ -110,6 +110,11 @@ pub const REGISTRY: &[Entry] = &[
         Kind::Bool,
         "Read the bus with fast sync read — needs XL330 firmware v46+",
     ),
+    entry(
+        "bus.body_imu_bus",
+        Kind::Text,
+        "I²C bus for the body IMU (LSM6DSV16X), e.g. /dev/i2c-3",
+    ),
     // ── [control] ────────────────────────────────────────────────────────────
     entry("control.hz", Kind::Integer, "Control loop rate"),
     entry(
