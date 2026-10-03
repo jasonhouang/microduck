@@ -17,8 +17,8 @@ use i2cdev::linux::LinuxI2CDevice;
 use crate::imu::{ImuData, SflpDecoder};
 use crate::io::ImuStale;
 
-/// 7-bit I²C address, SDO/SA0 tied high.
-const I2C_ADDR: u16 = 0x6B;
+/// 7-bit I²C address, SDO/SA0 tied low (i2c-4).
+const I2C_ADDR: u16 = 0x6A;
 
 /// WHO_AM_I response.
 const WHO_AM_I_REG: u8 = 0x0F;
@@ -91,25 +91,57 @@ pub struct Lsm6dsv16x {
     stale: ImuStale,
 }
 
+/// Max retries per I²C transaction — the bus is intermittently lossy without pull-ups.
+const I2C_RETRIES: usize = 3;
+
+/// Read one register byte via raw write-then-read, with retries.
+fn read_reg(dev: &mut LinuxI2CDevice, reg: u8) -> Result<u8, String> {
+    for attempt in 0..I2C_RETRIES {
+        if dev.write(&[reg]).is_ok() {
+            let mut buf = [0u8; 1];
+            if dev.read(&mut buf).is_ok() {
+                return Ok(buf[0]);
+            }
+        }
+        if attempt + 1 < I2C_RETRIES {
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    Err(format!("read reg 0x{reg:02x} failed after {I2C_RETRIES} retries"))
+}
+
+/// Write one register byte via raw write, with retries.
+fn write_reg(dev: &mut LinuxI2CDevice, reg: u8, val: u8) -> Result<(), String> {
+    for attempt in 0..I2C_RETRIES {
+        if dev.write(&[reg, val]).is_ok() {
+            return Ok(());
+        }
+        if attempt + 1 < I2C_RETRIES {
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    Err(format!("write reg 0x{reg:02x} failed after {I2C_RETRIES} retries"))
+}
+
 impl Lsm6dsv16x {
     /// Open the I²C bus, verify the chip, and start SFLP game rotation output.
     pub fn open(bus: &str) -> Result<Self, String> {
         let mut dev = LinuxI2CDevice::new(bus, I2C_ADDR)
             .map_err(|e| format!("open {bus}: {e}"))?;
 
-        let id = dev.smbus_read_byte_data(WHO_AM_I_REG).map_err(|e| format!("WHO_AM_I: {e}"))?;
+        let id = read_reg(&mut dev, WHO_AM_I_REG).map_err(|e| format!("WHO_AM_I: {e}"))?;
         if id != WHO_AM_I_OK {
             return Err(format!("WHO_AM_I = 0x{id:02x}, expected 0x{WHO_AM_I_OK:02x}"));
         }
 
         // Software reset.
-        let mut ctrl3 = dev.smbus_read_byte_data(CTRL3).map_err(|e| format!("read CTRL3: {e}"))?;
+        let mut ctrl3 = read_reg(&mut dev, CTRL3).map_err(|e| format!("read CTRL3: {e}"))?;
         ctrl3 |= 0x01;
-        dev.smbus_write_byte_data(CTRL3, ctrl3).map_err(|e| format!("reset: {e}"))?;
+        write_reg(&mut dev, CTRL3, ctrl3).map_err(|e| format!("reset: {e}"))?;
         thread::sleep(Duration::from_millis(30));
         // Wait for sw_reset to self-clear.
         for _ in 0..10 {
-            ctrl3 = dev.smbus_read_byte_data(CTRL3).unwrap_or(0);
+            ctrl3 = read_reg(&mut dev, CTRL3).unwrap_or(0);
             if ctrl3 & 0x01 == 0 {
                 break;
             }
@@ -117,39 +149,39 @@ impl Lsm6dsv16x {
         }
 
         // Accelerometer: 30 Hz, default operating mode.
-        dev.smbus_write_byte_data(CTRL1, ODR_HZ).map_err(|e| format!("CTRL1: {e}"))?;
+        write_reg(&mut dev, CTRL1, ODR_HZ).map_err(|e| format!("CTRL1: {e}"))?;
         // Gyroscope: 30 Hz, default operating mode.
-        dev.smbus_write_byte_data(CTRL2, ODR_HZ).map_err(|e| format!("CTRL2: {e}"))?;
+        write_reg(&mut dev, CTRL2, ODR_HZ).map_err(|e| format!("CTRL2: {e}"))?;
         // BDU (bit 6) + IF_INC (bit 2).
-        dev.smbus_write_byte_data(CTRL3, 0x44).map_err(|e| format!("CTRL3: {e}"))?;
+        write_reg(&mut dev, CTRL3, 0x44).map_err(|e| format!("CTRL3: {e}"))?;
         // Gyro full scale: 2000 dps (CTRL6 bits 0-3 = 0x4).
-        dev.smbus_write_byte_data(CTRL6, 0x04).map_err(|e| format!("CTRL6: {e}"))?;
+        write_reg(&mut dev, CTRL6, 0x04).map_err(|e| format!("CTRL6: {e}"))?;
         // Accel full scale: 4 g (CTRL8 bits 0-1 = 0x1).
-        dev.smbus_write_byte_data(CTRL8, 0x01).map_err(|e| format!("CTRL8: {e}"))?;
+        write_reg(&mut dev, CTRL8, 0x01).map_err(|e| format!("CTRL8: {e}"))?;
 
         // FIFO watermark = 7 bytes (one SFLP entry).
-        dev.smbus_write_byte_data(FIFO_CTRL1, FIFO_ENTRY_LEN as u8)
+        write_reg(&mut dev, FIFO_CTRL1, FIFO_ENTRY_LEN as u8)
             .map_err(|e| format!("FIFO_CTRL1: {e}"))?;
         // Batch accel at 30 Hz (low nibble), gyro at 30 Hz (high nibble).
-        dev.smbus_write_byte_data(FIFO_CTRL3, (ODR_HZ << 4) | ODR_HZ)
+        write_reg(&mut dev, FIFO_CTRL3, (ODR_HZ << 4) | ODR_HZ)
             .map_err(|e| format!("FIFO_CTRL3: {e}"))?;
         // FIFO stream mode (bits 0-2 = 0x6).
-        dev.smbus_write_byte_data(FIFO_CTRL4, 0x06).map_err(|e| format!("FIFO_CTRL4: {e}"))?;
+        write_reg(&mut dev, FIFO_CTRL4, 0x06).map_err(|e| format!("FIFO_CTRL4: {e}"))?;
 
         // Switch to embedded function bank.
-        dev.smbus_write_byte_data(FUNC_CFG_ACCESS, 0x80)
+        write_reg(&mut dev, FUNC_CFG_ACCESS, 0x80)
             .map_err(|e| format!("enter emb bank: {e}"))?;
         // Enable SFLP game rotation (EMB_FUNC_EN_A bit 1).
-        dev.smbus_write_byte_data(EMB_FUNC_EN_A, 0x02)
+        write_reg(&mut dev, EMB_FUNC_EN_A, 0x02)
             .map_err(|e| format!("EMB_FUNC_EN_A: {e}"))?;
         // Enable SFLP game in FIFO (EMB_FUNC_FIFO_EN_A bit 1).
-        dev.smbus_write_byte_data(EMB_FUNC_FIFO_EN_A, 0x02)
+        write_reg(&mut dev, EMB_FUNC_FIFO_EN_A, 0x02)
             .map_err(|e| format!("EMB_FUNC_FIFO_EN_A: {e}"))?;
         // SFLP ODR = 30 Hz (bits 0-2 = 0x1).
-        dev.smbus_write_byte_data(SFLP_ODR, 0x01)
+        write_reg(&mut dev, SFLP_ODR, 0x01)
             .map_err(|e| format!("SFLP_ODR: {e}"))?;
         // Switch back to main bank.
-        dev.smbus_write_byte_data(FUNC_CFG_ACCESS, 0x00)
+        write_reg(&mut dev, FUNC_CFG_ACCESS, 0x00)
             .map_err(|e| format!("leave emb bank: {e}"))?;
 
         // Wait for SFLP to bootstrap.
@@ -169,8 +201,8 @@ impl Lsm6dsv16x {
         // Drain non-game-rotation entries until we find the SFLP tag or exhaust the FIFO.
         let mut fifo = [0u8; FIFO_ENTRY_LEN];
         loop {
-            let lo = self.dev.smbus_read_byte_data(FIFO_STATUS1).ok()?;
-            let hi = self.dev.smbus_read_byte_data(FIFO_STATUS2).ok()?;
+            let lo = read_reg(&mut self.dev, FIFO_STATUS1).ok()?;
+            let hi = read_reg(&mut self.dev, FIFO_STATUS2).ok()?;
             let level = ((hi as u16 & 0x01) << 8) | lo as u16;
             if level < FIFO_ENTRY_LEN as u16 {
                 return None;
@@ -185,22 +217,14 @@ impl Lsm6dsv16x {
             }
         }
 
-        // The 0x17 payload is a rotation vector: 3 × i16 LE, scale 2⁻¹⁵ rad/LSB.
-        // Convert to a unit quaternion, then encode (Qx, Qy, Qz) as IEEE half-floats
-        // for the SflpDecoder which expects that format.
+        // The 0x17 payload is a game rotation vector: 3 × i16 LE, scale 2⁻¹⁵.
+        // ST's game rotation vector components are (axis · sin(α/2)), which are
+        // exactly the quaternion imaginary parts (qx, qy, qz). The decoder
+        // recovers w = √(1 − x² − y² − z²) — no conversion needed here.
         let rotvec_bytes = &fifo[1..7];
-        let rx = i16::from_le_bytes([rotvec_bytes[0], rotvec_bytes[1]]) as f64 / 32768.0;
-        let ry = i16::from_le_bytes([rotvec_bytes[2], rotvec_bytes[3]]) as f64 / 32768.0;
-        let rz = i16::from_le_bytes([rotvec_bytes[4], rotvec_bytes[5]]) as f64 / 32768.0;
-
-        let angle = (rx * rx + ry * ry + rz * rz).sqrt();
-        let (qw, qx, qy, qz) = if angle < 1e-9 {
-            (1.0, 0.0, 0.0, 0.0)
-        } else {
-            let half = angle * 0.5;
-            let sinc_half = half.sin() / angle;
-            (half.cos(), rx * sinc_half, ry * sinc_half, rz * sinc_half)
-        };
+        let qx = i16::from_le_bytes([rotvec_bytes[0], rotvec_bytes[1]]) as f64 / 32768.0;
+        let qy = i16::from_le_bytes([rotvec_bytes[2], rotvec_bytes[3]]) as f64 / 32768.0;
+        let qz = i16::from_le_bytes([rotvec_bytes[4], rotvec_bytes[5]]) as f64 / 32768.0;
 
         // Read raw gyro (6 bytes from OUT_GYRO_X_L).
         let mut gyro = [0u8; 6];

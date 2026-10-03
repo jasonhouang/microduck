@@ -1120,11 +1120,11 @@ version = "0.15.0"
 dependencies = [
  "duck-ipc-proto",
  "i2cdev",
+ "libc",
  "libloading 0.8.9",
  "ort",
  "serde",
  "serde_json",
- "serialport",
  "sha2 0.11.0",
  "thiserror",
  "tracing",

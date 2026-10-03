@@ -26,7 +26,7 @@ port = "/dev/ttyS2"
 
 # I²C bus for the body IMU (LSM6DSV16X). Set to the Radxa's I²C device node;
 # empty or a missing device disables the body IMU gracefully.
-body_imu_bus = "/dev/i2c-3"
+body_imu_bus = "/dev/i2c-4"
 
 # Every value below that is commented out shows the built-in default. LEAVE IT COMMENTED
 # unless this robot genuinely needs a different value: install.sh copies this file to

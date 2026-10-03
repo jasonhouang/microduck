@@ -31,11 +31,9 @@ libloading = "0.8"
 sha2 = "0.11.0"
 ort = { version = "=2.0.0-rc.11", default-features = false, features = ["load-dynamic"] }
 
-# `default-features = false` drops serialport's `libudev` feature, which exists only for
-# enumerating ports (`available_ports`). We open one by path from the params file and never
-# enumerate — and libudev-sys needs a pkg-config sysroot that the board's cross-build does
-# not have, so leaving it on breaks the aarch64 build outright.
-serialport = { version = "4.8", default-features = false }
+# Raw libc for serial port I/O — the serialport crate adds ~13ms per transaction
+# on the RK3568 UART driver; poll() + raw fd returns in 0.3–0.7ms.
+libc = "0.2"
 
 # Body IMU over I²C — Linux-only, the same rule `tof` applies for the head IMU.
 # Off Linux `duck-control` still builds and runs every test against `FakeIo`.

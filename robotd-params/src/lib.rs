@@ -1744,7 +1744,7 @@ impl Default for PolicyParams {
             standing_action_scale: 1.0,
             // The prototype's `--standing-kp-ratio`.
             standing_gain_ratio: 0.8,
-            gain: 200,
+            gain: 30,
             head_lowpass: None,
             legs_lowpass: None,
             ground_pick_period: None,
@@ -1763,7 +1763,7 @@ impl Default for SafetyParams {
             fall_gravity_z: -0.5,
             fall_debounce_ms: 200,
             deadman_ms: 500,
-            gain_limp: 50,
+            gain_limp: 10,
             battery_empty_shutdown: true,
             limp_fall: false,
             limp_fall_tilt_z: -0.90,
@@ -1774,7 +1774,7 @@ impl Default for SafetyParams {
             limp_fall_still_ms: 200,
             limp_fall_max_ms: 1500,
             limp_fall_pose_ms: 600,
-            limp_fall_pose_gain: 160,
+            limp_fall_pose_gain: 25,
         }
     }
 }
@@ -1802,7 +1802,7 @@ pub struct Bus {
     /// the bus drops, `update_gate` sees an unhealthy robot, and a release that turned this on
     /// against firmware that cannot do it is rolled back on its own.
     pub fast_sync_read: bool,
-    /// I²C bus for the body IMU (LSM6DSV16X), e.g. `/dev/i2c-3`. Empty disables it.
+    /// I²C bus for the body IMU (LSM6DSV16X), e.g. `/dev/i2c-4`. Empty disables it.
     pub body_imu_bus: String,
 }
 
@@ -1874,7 +1874,7 @@ impl Default for Bus {
         Self {
             port: "/dev/ttyS2".into(),
             fast_sync_read: true,
-            body_imu_bus: "/dev/i2c-3".into(),
+            body_imu_bus: "/dev/i2c-4".into(),
         }
     }
 }
@@ -3119,7 +3119,7 @@ mod tests {
         assert_eq!(p.action_scale, 0.9);
         assert_eq!(p.standing_action_scale, 1.0);
         assert_eq!(p.standing_gain_ratio, 0.8, "--standing-kp-ratio");
-        assert_eq!(p.gain, 200);
+        assert_eq!(p.gain, 30);
         assert_eq!(
             p.head_lowpass,
             Some(0.5),
@@ -3233,7 +3233,7 @@ mod tests {
             "the rebased roller line keeps the trained filters"
         );
         assert_eq!(p.legs_lowpass, Some(0.7));
-        assert_eq!(p.gain, 200);
+        assert_eq!(p.gain, 30);
     }
 
     /// `"none"` disables an optional slot outright — the prototype's `--sitstand-policy None`
