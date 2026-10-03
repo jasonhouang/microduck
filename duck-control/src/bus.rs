@@ -63,7 +63,7 @@ pub struct FeetechIo {
 
 impl FeetechIo {
     pub fn open(port: &str, imu_bus: Option<&str>) -> Result<Self> {
-        let servo = Servo::connect(port, BAUD_RATE, READ_TIMEOUT.as_millis() as u64, true, false)
+        let servo = Servo::connect(port, BAUD_RATE, READ_TIMEOUT.as_millis() as u64, false, false)
             .map_err(|e| IoError::Port {
                 path: port.to_owned(),
                 source: std::io::Error::other(std::io::Error::other(e.to_string())),
