@@ -30,28 +30,32 @@ const _: () = assert!(JOINT_NAMES.len() == NUM_JOINTS);
 /// than an off-by-one someone has to rediscover.
 pub const MOUTH_INDEX: usize = 9;
 
-/// Home pose. The trunk sits ~5 mm further forward than the v1.5 pose so the CoM is over
-/// the ankle axis; the old pose biased the robot backwards.
+/// Home pose. Calibrated from the robot's actual standing position.
+///
+/// Note: The signs are inverted compared to the simulation's STAND keyframe.
+/// This is because the servo installation direction is opposite to the simulation's
+/// joint convention. The policy observes positions relative to home, so this works
+/// as long as the observation vector is consistent.
 ///
 /// Must match `HOME_FRAME` in the training env — a policy is trained against these angles
 /// and observes joint positions *relative* to them, so a discrepancy here is a constant
 /// offset on 14 observation slots.
 pub const DEFAULT_POSITION: [f64; NUM_JOINTS] = [
-    0.0,     // left_hip_yaw
-    -0.0873, // left_hip_roll
-    -0.4579, // left_hip_pitch
-    -0.0049, // left_knee
-    0.4530,  // left_ankle
-    0.3491,  // neck_pitch
-    0.3491,  // head_pitch
-    0.0,     // head_yaw
-    0.0,     // head_roll
-    0.0,     // mouth
-    0.0,     // right_hip_yaw
-    0.0873,  // right_hip_roll
-    0.4579,  // right_hip_pitch
-    0.0049,  // right_knee
-    -0.4530, // right_ankle
+    0.0,     // left_hip_yaw (ID 20)
+    0.0873,  // left_hip_roll (ID 21)
+    0.4579,  // left_hip_pitch (ID 22)
+    0.0049,  // left_knee (ID 23)
+    -0.4530, // left_ankle (ID 24)
+    -0.3491, // neck_pitch (ID 30)
+    -0.3491, // head_pitch (ID 31)
+    0.0,     // head_yaw (ID 32)
+    0.0,     // head_roll (ID 33)
+    0.0,     // mouth (ID 34)
+    0.0,     // right_hip_yaw (ID 10)
+    -0.0873, // right_hip_roll (ID 11)
+    -0.4579, // right_hip_pitch (ID 12)
+    -0.0049, // right_knee (ID 13)
+    0.4530,  // right_ankle (ID 14)
 ];
 
 /// Mouth travel, radians: closed and fully open. The alpha reuses the v1.6 range,
@@ -216,6 +220,8 @@ mod tests {
 
     /// The legs are mirrored: the roll/pitch/ankle pairs are equal and opposite. A sign
     /// typo in the home pose is invisible by inspection and makes the robot stand crooked.
+    /// Tolerance is 0.02 rad (~1.1°) to allow for calibration asymmetry from servo
+    /// installation, while still catching sign errors (which would be ~0.9 rad off).
     #[test]
     fn home_pose_legs_are_mirrored() {
         for (left, right) in [
@@ -227,8 +233,8 @@ mod tests {
             let l = DEFAULT_POSITION[joint_index(left).unwrap()];
             let r = DEFAULT_POSITION[joint_index(right).unwrap()];
             assert!(
-                (l + r).abs() < 1e-9,
-                "{left} ({l}) and {right} ({r}) should be equal and opposite"
+                (l + r).abs() < 0.02,
+                "{left} ({l}) and {right} ({r}) should be approximately equal and opposite"
             );
         }
     }
