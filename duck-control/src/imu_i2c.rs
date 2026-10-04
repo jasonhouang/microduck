@@ -129,6 +129,11 @@ impl Lsm6dsv16x {
         let mut dev = LinuxI2CDevice::new(bus, I2C_ADDR)
             .map_err(|e| format!("open {bus}: {e}"))?;
 
+        // Ensure we're in the main register bank before reading WHO_AM_I.
+        // The IMU may be in the embedded function bank from a previous session.
+        write_reg(&mut dev, FUNC_CFG_ACCESS, 0x00)
+            .map_err(|e| format!("switch to main bank: {e}"))?;
+
         let id = read_reg(&mut dev, WHO_AM_I_REG).map_err(|e| format!("WHO_AM_I: {e}"))?;
         if id != WHO_AM_I_OK {
             return Err(format!("WHO_AM_I = 0x{id:02x}, expected 0x{WHO_AM_I_OK:02x}"));

@@ -73,9 +73,10 @@ impl Default for SflpDecoder {
 }
 
 impl SflpDecoder {
-    /// The body IMU (LSM6DSV16X on i2c-4) is mounted with its coordinate frame aligned
-    /// to the trunk frame — no rotation correction needed.
-    pub const DEFAULT_MOUNT: [f64; 4] = [1.0, 0.0, 0.0, 0.0];
+    /// The body IMU (LSM6DSV16X on i2c-4) is mounted rotated 90° counter-clockwise around Z axis.
+    /// This swaps X and Y axes: Sensor X → Trunk -Y, Sensor Y → Trunk X.
+    /// Mount quaternion for 90° CCW around Z: [cos(45°), 0, 0, sin(45°)]
+    pub const DEFAULT_MOUNT: [f64; 4] = [0.7071068, 0.0, 0.0, 0.7071068];
 
     pub fn new(mount: [f64; 4]) -> Self {
         Self {
