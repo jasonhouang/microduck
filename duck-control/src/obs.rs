@@ -198,8 +198,10 @@ impl Observation {
         fill(gravity, imu.gravity);
         let angles = policy_joints(joint_positions);
         let home = policy_joints(home_pose);
-        fill(positions, std::array::from_fn(|i| angles[i] - home[i]));
-        fill(velocities, policy_joints(joint_velocities));
+        // Negate positions and velocities because servo installation direction is opposite
+        // to the simulation's joint convention (same reason home pose and action are negated).
+        fill(positions, std::array::from_fn(|i| -(angles[i] - home[i])));
+        fill(velocities, std::array::from_fn(|i| -policy_joints(joint_velocities)[i]));
 
         // Already `f32`, and the same width, so this is a plain copy rather than a
         // conversion — the previous action is the policy's own output fed back.
@@ -234,12 +236,15 @@ impl Observation {
     /// The mouth is absent from every alpha policy, so its slot stays at whatever the
     /// caller had. Getting this wrong shifts every joint after index 9 by one, which is
     /// both catastrophic and completely silent.
+    ///
+    /// All action values are negated because the servo installation direction is opposite
+    /// to the simulation's joint convention (same reason DEFAULT_POSITION signs are inverted).
     pub fn scatter_action(action: &[f32; ACTION_LEN]) -> [f64; NUM_JOINTS] {
         let mut out = [0.0f64; NUM_JOINTS];
         // The mirror of `policy_joints`, through the same `joint_of` mapping: that one
         // reads the mouth out, this writes around it.
         for (slot, value) in action.iter().enumerate() {
-            out[joint_of(slot)] = *value as f64;
+            out[joint_of(slot)] = -*value as f64;
         }
         out
     }
@@ -293,6 +298,7 @@ mod tests {
     /// Each block must land at the offset the policy expects. This pins all six boundaries
     /// with distinguishable values, so a block that moves shows up as a specific index
     /// rather than as a robot that walks badly.
+    /// Joint positions and velocities are negated to match the physical servo direction.
     #[test]
     fn every_block_lands_at_its_documented_offset() {
         let mut positions = DEFAULT_POSITION;
@@ -306,7 +312,7 @@ mod tests {
 
         assert_eq!(&d[0..3], &[1.0, 2.0, 3.0], "gyro");
         assert_eq!(&d[3..6], &[4.0, 5.0, 6.0], "gravity");
-        assert!((d[6] - 0.25).abs() < 1e-6, "joint_pos relative to home");
+        assert!((d[6] - (-0.25)).abs() < 1e-6, "joint_pos relative to home (negated)");
         assert_eq!(d[20], 0.0, "joint_vel");
         assert_eq!(d[34], -0.5, "last_action first");
         assert_eq!(d[47], 0.75, "last_action last");
@@ -367,6 +373,7 @@ mod tests {
     }
 
     /// Scattering 14 actions back over 15 joints must skip the mouth, not shift past it.
+    /// Actions are negated to match the physical servo direction.
     #[test]
     fn scattering_an_action_skips_the_mouth() {
         let mut action = [0.0f32; ACTION_LEN];
@@ -377,12 +384,12 @@ mod tests {
         let scattered = Observation::scatter_action(&action);
 
         assert_eq!(scattered[MOUTH_INDEX], 0.0, "mouth must be left alone");
-        // Joints before the mouth line up one-to-one...
-        assert_eq!(scattered[0], 1.0);
-        assert_eq!(scattered[8], 9.0);
+        // Joints before the mouth line up one-to-one (negated)...
+        assert_eq!(scattered[0], -1.0);
+        assert_eq!(scattered[8], -9.0);
         // ...and those after it are offset by exactly one policy slot.
-        assert_eq!(scattered[10], 10.0);
-        assert_eq!(scattered[NUM_JOINTS - 1], ACTION_LEN as f64);
+        assert_eq!(scattered[10], -10.0);
+        assert_eq!(scattered[NUM_JOINTS - 1], -(ACTION_LEN as f64));
     }
 
     /// Walking versus standing is chosen on command magnitude, so the magnitude has to be
