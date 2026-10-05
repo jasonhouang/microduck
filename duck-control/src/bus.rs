@@ -43,12 +43,15 @@ const REBOOT_SETTLE: Duration = Duration::from_millis(500);
 /// Pause after each EPROM write.
 const EEPROM_SETTLE: Duration = Duration::from_millis(20);
 
+/// HD1910 position offset: 2048 = 0° (center)
+const POS_OFFSET: i64 = 2048;
+
 fn raw_to_radians(raw: i64) -> f64 {
-    raw as f64 * RAD_PER_UNIT
+    (raw - POS_OFFSET) as f64 * RAD_PER_UNIT
 }
 
 fn radians_to_raw(rad: f64) -> i64 {
-    (rad / RAD_PER_UNIT).round() as i64
+    (rad / RAD_PER_UNIT).round() as i64 + POS_OFFSET
 }
 
 fn raw_vel_to_rad_per_sec(raw: i64) -> f64 {
@@ -73,6 +76,7 @@ impl FeetechIo {
             Some(bus) => match Lsm6dsv16x::open(bus) {
                 Ok(imu) => Some(imu),
                 Err(e) => {
+                    eprintln!("IMU open error: {}", e);
                     tracing::warn!(error = %e, bus, "body IMU not available");
                     None
                 }
@@ -230,11 +234,12 @@ impl FeetechIo {
         let pos_reg = registers::find_register("pos").unwrap();
         let mut out = [0.0; NUM_JOINTS];
         for (i, &id) in JOINT_IDS.iter().enumerate() {
-            let raw = self
-                .servo
-                .read_reg(id, pos_reg)
-                .map_err(|e| IoError::Bus(format!("read pos on {id}: {e}")))?;
-            out[i] = raw_to_radians(raw);
+            match self.servo.read_reg(id, pos_reg) {
+                Ok(raw) => out[i] = raw_to_radians(raw),
+                Err(e) => {
+                    tracing::warn!(id, error = %e, "failed to read position, using 0.0");
+                }
+            }
         }
         Ok(out)
     }
@@ -260,6 +265,17 @@ impl FeetechIo {
             std::thread::sleep(step);
         }
         Ok(())
+    }
+
+    /// Read a single register from a servo (for diagnostics).
+    pub fn read_reg(&mut self, id: u8, reg: &crate::feetech::registers::Register) -> Result<i64> {
+        self.servo.read_reg(id, reg).map_err(|e| IoError::Bus(format!("read reg on {id}: {e}")))
+    }
+
+    /// Read IMU data only (for diagnostics, independent of servo bus).
+    #[cfg(target_os = "linux")]
+    pub fn read_imu(&mut self) -> Option<crate::imu::ImuData> {
+        self.imu.as_mut().and_then(|imu| imu.read())
     }
 }
 
