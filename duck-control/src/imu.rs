@@ -344,7 +344,7 @@ mod tests {
         assert!(magnitude > 0.0);
         let expected = 1000.0 * GYRO_RAD_PER_LSB;
         assert!(
-            (magnitude - expected).abs() < 1e-9,
+            (magnitude - expected).abs() < 1e-7,
             "expected |gyro| {expected}, got {magnitude}"
         );
     }

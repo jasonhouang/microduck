@@ -124,27 +124,22 @@ impl FeetechIo {
         // An EEPROM register like the others, so it is written only with torque off, which is how
         // a servo powers up and how a fresh one is adopted.
         let want = homing_offset(id);
-        let got = *self
-            .controller
-            .read_homing_offset(id)
-            .map_err(|e| IoError::Bus(format!("read homing_offset on {id}: {e}")))?
-            .first()
-            .ok_or(IoError::ShortRead {
-                what: "register read",
-                expected: 1,
-                got: 0,
-            })?;
-        if got != want {
+        let offset_reg = registers::find_register("pos-offset").unwrap();
+        let got = self
+            .servo
+            .read_reg(id, offset_reg)
+            .map_err(|e| IoError::Bus(format!("read pos-offset on {id}: {e}")))?;
+        if got != want as i64 {
             tracing::warn!(
                 id,
-                register = "homing_offset",
+                register = "pos-offset",
                 got,
                 want,
                 "correcting motor register"
             );
-            self.controller
-                .write_homing_offset(id, want)
-                .map_err(|e| IoError::Bus(format!("write homing_offset on {id}: {e}")))?;
+            self.servo
+                .save_reg(id, offset_reg, want as i64)
+                .map_err(|e| IoError::Bus(format!("write pos-offset on {id}: {e}")))?;
             std::thread::sleep(EEPROM_SETTLE);
             fixed += 1;
         }

@@ -42,20 +42,20 @@ pub const MOUTH_INDEX: usize = 9;
 /// offset on 14 observation slots.
 pub const DEFAULT_POSITION: [f64; NUM_JOINTS] = [
     0.0,     // left_hip_yaw (ID 20)
-    0.0873,  // left_hip_roll (ID 21)
-    0.4579,  // left_hip_pitch (ID 22)
-    0.0049,  // left_knee (ID 23)
-    -0.4530, // left_ankle (ID 24)
-    -0.3491, // neck_pitch (ID 30)
-    -0.3491, // head_pitch (ID 31)
+    -0.0873, // left_hip_roll (ID 21)
+    -0.4579, // left_hip_pitch (ID 22)
+    -0.0049, // left_knee (ID 23)
+    0.4530,  // left_ankle (ID 24)
+    0.3491,  // neck_pitch (ID 30)
+    0.3491,  // head_pitch (ID 31)
     0.0,     // head_yaw (ID 32)
     0.0,     // head_roll (ID 33)
     0.0,     // mouth (ID 34)
     0.0,     // right_hip_yaw (ID 10)
-    -0.0873, // right_hip_roll (ID 11)
-    -0.4579, // right_hip_pitch (ID 12)
-    -0.0049, // right_knee (ID 13)
-    0.4530,  // right_ankle (ID 14)
+    0.0873,  // right_hip_roll (ID 11)
+    0.4579,  // right_hip_pitch (ID 12)
+    0.0049,  // right_knee (ID 13)
+    -0.4530, // right_ankle (ID 14)
 ];
 
 /// Rest pose: where a seated robot settles with its torque off. Recorded on graphite-bang
