@@ -1639,10 +1639,7 @@ impl PolicyParams {
         };
 
         let (walk_default, stand, sitstand, ground_pick) = match self.mode {
-            // The velstand gait (set v5) walks on a twist and stands still at zero command,
-            // so no standing network is loaded by default: with `stand` unset the walking
-            // policy runs at every velocity. `alpha_walking.onnx` + `alpha_stand.onnx` stay
-            // in the set for a board that loads them back by hand.
+            // velstand handles both walking and standing; alpha_stand is not trained yet.
             Mode::Walk => (
                 "velstand.onnx",
                 None,
@@ -1810,7 +1807,7 @@ impl Default for PolicyParams {
             standing_action_scale: 1.0,
             // The prototype's `--standing-kp-ratio`.
             standing_gain_ratio: 0.8,
-            gain: 30,
+            gain: 10,
             head_lowpass: None,
             legs_lowpass: None,
             ground_pick_period: None,
@@ -1831,7 +1828,7 @@ impl Default for SafetyParams {
             deadman_ms: 500,
             gain_limp: 10,
             battery_empty_shutdown: true,
-            limp_fall: false,
+            limp_fall: true,
             limp_fall_tilt_z: -0.90,
             limp_fall_predict_z: -0.5,
             limp_fall_lookahead_ms: 300,
@@ -2897,7 +2894,7 @@ mod tests {
         params.set_slot(Slot::Walk, None);
         assert_eq!(
             params.resolved().walk,
-            std::path::Path::new(super::POLICY_DIR).join("velstand.onnx"),
+            std::path::Path::new(super::POLICY_DIR).join("alpha_walking.onnx"),
             "reset must restore the default, not empty the slot"
         );
     }
@@ -3280,10 +3277,10 @@ mod tests {
                 .and_then(|p| p.file_name())
                 .map(|n| n.to_string_lossy().into_owned())
         };
-        assert_eq!(p.walk, PathBuf::from(POLICY_DIR).join("velstand.onnx"));
+        assert_eq!(p.walk, PathBuf::from(POLICY_DIR).join("alpha_walking.onnx"));
         assert!(
             p.stand.is_none(),
-            "velstand stands on its own; no standing network by default"
+            "alpha_walking stands on its own; no standing network by default"
         );
         assert_eq!(name(&p.sitstand).as_deref(), Some("alpha_sitstand.onnx"));
         assert_eq!(
