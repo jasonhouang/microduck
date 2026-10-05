@@ -121,28 +121,11 @@ impl FeetechIo {
             fixed += 1;
         }
 
-        // An EEPROM register like the others, so it is written only with torque off, which is how
-        // a servo powers up and how a fresh one is adopted.
-        let want = homing_offset(id);
-        let offset_reg = registers::find_register("pos-offset").unwrap();
-        let got = self
-            .servo
-            .read_reg(id, offset_reg)
-            .map_err(|e| IoError::Bus(format!("read pos-offset on {id}: {e}")))?;
-        if got != want as i64 {
-            tracing::warn!(
-                id,
-                register = "pos-offset",
-                got,
-                want,
-                "correcting motor register"
-            );
-            self.servo
-                .save_reg(id, offset_reg, want as i64)
-                .map_err(|e| IoError::Bus(format!("write pos-offset on {id}: {e}")))?;
-            std::thread::sleep(EEPROM_SETTLE);
-            fixed += 1;
-        }
+        // pos-offset (homing offset) is user-calibrated and must not be overwritten.
+        // The original code enforced a fixed homing_offset per joint (knees had -512,
+        // others 0), but this clobbers user calibration done with external tools.
+        // If a servo needs a homing offset, it should be calibrated once and preserved.
+
         Ok(fixed)
     }
 
