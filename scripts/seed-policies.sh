@@ -1,12 +1,16 @@
 #!/bin/sh
-# Install the official policy set, downloading it from the Hugging Face Hub.
+# Install the locally trained HD1910 policy set from the policies/ directory.
+#
+# **This is NOT the official policy set from Hugging Face.** These are locally trained models
+# specifically for the HD1910 servo configuration, stored in the policies/ directory within this
+# repo. The official XL330-based policies from pollen-robotics/microduck-policies are not compatible
+# with the HD1910 servos and should not be used.
 #
 # `robotd` reads its policies from /opt/robot/policies/current, deliberately outside the release:
 # a gait retrain should not need a daemon release, and a daemon fix should not re-ship six
 # megabytes of unchanged weights (docs/design/policy-channel-design.md §9). This is what fills
-# that directory, and it fetches rather than copies — the same arrangement `setup-board.sh` uses
-# for ONNX Runtime and `setup-gstreamer.sh` for the plugins, which are the other two things a
-# board needs and a release has no business carrying.
+# that directory, and it copies from the policies/ directory within this repo — the HD1910
+# servo models are trained locally and need to be deployed without going through Hugging Face.
 #
 # Run by `hooks/postinstall` on every update and by `scripts/install.sh` on a fresh board, which
 # between them are every way policies reach a robot.
@@ -16,7 +20,7 @@
 # something else and replacing it would silently undo that on the next unrelated daemon update.
 # One from our repo is moved up to the pin when it is *below* it — the daemon's defaults name
 # files a newer set carries, and a board that updates the daemon but keeps an old set would
-# otherwise fail to load its gait and roll the update back — and left alone otherwise.
+# otherwise fail to load its gait and roll the release back — and left alone otherwise.
 #
 # Nothing here is signed and that is deliberate: a policy is not a binary. `robotd` holds the only
 # write handle to the bus behind joint clamps, a fall reflex and an intent deadman, and refuses
@@ -27,16 +31,16 @@
 # Never fatal. A robot with no policy holds its pose and reports *degraded* — a board to fix, not
 # a release to roll back.
 #
-# A board that cannot reach the Hub on a first install ends up with no policies, and that is the
-# accepted shape rather than an oversight: `robotd` holds its pose and reports *degraded*, the
-# update gate passes, and the next update fetches. It is the same bargain `setup-board.sh` makes
-# for ONNX Runtime — the board prerequisites need a network once.
-#
 # Usage: seed-policies.sh [POLICY_ROOT]
 # Defaults to what a robot uses; the argument exists so this can be tested off a board.
 set -eu
 
 POLICY_ROOT="${1:-/opt/robot/policies}"
+
+# Local policy directory. The HD1910 models are in the policies/ directory within this repo.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOCAL_POLICY_DIR="${LOCAL_POLICY_DIR:-$REPO_ROOT/policies}"
 
 # The pin. An xtask test asserts these literals match `[workspace.metadata.policies]` in
 # Cargo.toml — this script runs from inside a release and cannot read the manifest, which is the
@@ -47,31 +51,11 @@ POLICY_ROOT="${1:-/opt/robot/policies}"
 # board past it — `robotctl policy update`, which needs no daemon release — is left where it is.
 # Bumping this ships inside a release, so bump it when the daemon's defaults need the new set
 # (a slot defaulting to a file only the new set carries), and tag the set first.
-POLICY_REPO="${POLICY_REPO:-pollen-robotics/microduck-policies}"
-POLICY_VERSION="${POLICY_VERSION:-v5}"
-POLICY_BASE_URL="${POLICY_BASE_URL:-https://huggingface.co/${POLICY_REPO}/resolve/${POLICY_VERSION}}"
-
-# The set says what is in it. `manifest.json` lists every policy, and that list is what gets
-# downloaded — so adding a tenth policy to the set is a tag on the Hub rather than an edit here
-# and a daemon release to carry it.
-#
-# The fallback below is what robotd's own defaults name (both modes), for a revision tagged
-# before the manifest did. It goes when every tagged set carries one.
-#
-# The grep is over a file we generate, so its shape is ours: one `"file": "name.onnx"` per policy.
-# A JSON parser is not available here — this runs from a release on a board with curl and a
-# POSIX shell — and an xtask test asserts the pattern matches what the manifest actually says.
-FALLBACK_FILES="velstand.onnx alpha_sitstand.onnx alpha_ground_pick.onnx ball_kick_left.onnx ball_kick_right.onnx roller.onnx roller_crouch.onnx roulade.onnx"
-
-# Per-file, because `hooks/postinstall` runs inside an update under a 120-second hook timeout and
-# a hook that times out fails the update and rolls it back. Ten files at eight seconds is 80,
-# which leaves the rest of the hook room; a link that cannot move 800 KB in eight seconds is one
-# the fallback below is for, and the next update tries again.
-CURL_OPTS="--fail --location --silent --show-error --connect-timeout 5 --max-time 8"
+POLICY_VERSION="${POLICY_VERSION:-v6-hd1910}"
 
 # Where a set came from, written beside it.
 #
-# It is what lets `robotctl policy check` ask the Hub whether there is anything newer without
+# It is what lets `robotctl policy check` ask whether there is anything newer without
 # anybody configuring the repo a second time. One writer, one copy, no drift — and a set that a
 # different tool installs later carries its own, so "what is this and where is it from" has the
 # same answer however it arrived.
@@ -80,7 +64,7 @@ CURL_OPTS="--fail --location --silent --show-error --connect-timeout 5 --max-tim
 write_source() {
     [ ! -f "$1/.source" ] || return 0
     {
-        echo "repo=${POLICY_REPO}"
+        echo "repo=local-microduck_rl"
         echo "version=${2}"
         echo "fetched=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "$1/.source" || echo "seed-policies: cannot record where this set came from" >&2
@@ -108,8 +92,10 @@ live="$(readlink "${POLICY_ROOT}/current" 2>/dev/null || true)"
 # not say where it came from — and so that this comparison can read it next time.
 number_of() {
     # "v5" -> 5; anything that is not a plain vN is "" and never compares.
+    # For v6-hd1910, extract the 6.
     case "$1" in
         v[0-9]|v[0-9][0-9]|v[0-9][0-9][0-9]) echo "${1#v}" ;;
+        v[0-9]-*) echo "${1#v}" | cut -d- -f1 ;;  # v6-hd1910 -> 6
         *) echo "" ;;
     esac
 }
@@ -126,7 +112,7 @@ if [ -n "$live" ]; then
     have_version="$(sed -n 's/^version=//p' "$record" 2>/dev/null | head -n 1)"
     have="$(number_of "$have_version")"
     want="$(number_of "$POLICY_VERSION")"
-    if [ "$have_repo" != "$POLICY_REPO" ] || [ -z "$have" ] || [ -z "$want" ] \
+    if [ "$have_repo" != "local-microduck_rl" ] || [ -z "$have" ] || [ -z "$want" ] \
         || [ "$have" -ge "$want" ]; then
         exit 0
     fi
@@ -137,49 +123,36 @@ staging="${POLICY_ROOT}/releases/.staging"
 rm -rf "$staging"
 mkdir -p "$staging" || { echo "seed-policies: cannot create ${staging}" >&2; exit 0; }
 
-# Everything into staging first, so a partial download is never what `current` points at.
+# Everything into staging first, so a partial copy is never what `current` points at.
 ok=yes
 
-# The manifest, and the file list from it. Fetched into staging like everything else, so it is
-# installed beside the policies it describes and `robotd` can read what it says.
-# shellcheck disable=SC2086
-if curl $CURL_OPTS -o "${staging}/manifest.json" "${POLICY_BASE_URL}/manifest.json"; then
-    POLICY_FILES="$(sed -n 's/.*"file"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-        "${staging}/manifest.json" | tr '\n' ' ')"
-else
-    rm -f "${staging}/manifest.json"
-    POLICY_FILES=""
-fi
-if [ -z "$POLICY_FILES" ]; then
-    echo "seed-policies: no manifest in ${POLICY_VERSION}; taking the set this release knows" >&2
-    POLICY_FILES="$FALLBACK_FILES"
+# Check that the local policy directory exists.
+if [ ! -d "$LOCAL_POLICY_DIR" ]; then
+    echo "seed-policies: local policy directory ${LOCAL_POLICY_DIR} does not exist" >&2
+    rm -rf "$staging"
+    exit 0
 fi
 
-for name in $POLICY_FILES; do
-    # A plain file name, or nothing. The manifest is fetched from a repo this script's caller
-    # can point anywhere, and `${staging}/${name}` would otherwise let one naming `../../etc/…`
-    # choose where the download lands. `updater::policy::files_in_manifest` applies the same rule
-    # to the same field.
-    case "$name" in
-        */*|*\\*|.*)
-            echo "seed-policies: ignoring ${name} — a policy is a file name" >&2
-            continue ;;
-    esac
-    # shellcheck disable=SC2086  # CURL_OPTS is a deliberate word list
-    if ! curl $CURL_OPTS -o "${staging}/${name}" "${POLICY_BASE_URL}/${name}"; then
-        echo "seed-policies: could not fetch ${name} from ${POLICY_BASE_URL}" >&2
+# Copy models from local policies directory. Models are already renamed to the expected names.
+# Required: velstand.onnx, alpha_sitstand.onnx, alpha_ground_pick.onnx
+REQUIRED_MODELS="velstand.onnx alpha_sitstand.onnx alpha_ground_pick.onnx"
+
+for model in $REQUIRED_MODELS; do
+    if [ -f "$LOCAL_POLICY_DIR/$model" ]; then
+        cp "$LOCAL_POLICY_DIR/$model" "$staging/$model" \
+            || { echo "seed-policies: cannot copy $model" >&2; ok=no; }
+    else
+        echo "seed-policies: required model $model not found in ${LOCAL_POLICY_DIR}" >&2
         ok=no
-        break
     fi
 done
 
 if [ "$ok" = no ]; then
-    # Nothing partial ever goes live, and nothing already installed is disturbed. A half-published
-    # revision or a link that was down leaves the board exactly as it was — on the previous set if
-    # it has one, with none if it does not — and the pin is retried at the next update. A board
-    # below the minimum that stays there is one whose daemon cannot load its default gait; robotd
-    # then reports unhealthy and the update rolls back, which is the honest outcome and the
-    # message above is the reason.
+    # Nothing partial ever goes live, and nothing already installed is disturbed. A missing model
+    # leaves the board exactly as it was — on the previous set if it has one, with none if it
+    # does not — and the pin is retried at the next update. A board below the minimum that stays
+    # there is one whose daemon cannot load its default gait; robotd then reports unhealthy and
+    # the update rolls back, which is the honest outcome and the message above is the reason.
     rm -rf "$staging"
     echo "seed-policies: leaving the policies already installed alone" >&2
     exit 0
