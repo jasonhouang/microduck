@@ -1,0 +1,203 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+Microduck is a tiny biped robot (~25cm, 800g) controlled by reinforcement learning policies. This repository contains the robot's "brain" — a collection of Rust daemons running on a Rockchip RK3566 (aarch64) that handle motor control, sensor fusion, media streaming, updates, and connectivity.
+
+The policies themselves are trained in a separate repository: [microduck_rl](https://github.com/pollen-robotics/microduck_rl).
+
+## Common Commands
+
+### Building and Testing
+
+```bash
+# Run all tests (no hardware, no network, no Docker)
+cargo test --workspace
+
+# Run tests for a specific crate
+cargo test -p <crate>
+
+# Format all code
+cargo fmt --all
+
+# Lint (fail on warnings in CI, locally warnings don't block)
+cargo clippy --workspace --all-targets
+
+# Lint Linux-only crates for the board target (required before shipping)
+RUSTFLAGS="-D warnings" cargo clippy -p configd --all-targets --target aarch64-unknown-linux-gnu
+```
+
+**Linux dependencies** (required for `padd` and `mediad`):
+```bash
+sudo apt-get install -y libudev-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev
+```
+
+### Cross-Compilation for the Robot Board
+
+```bash
+# Build for the robot board (aarch64, uses cargo-zigbuild)
+cargo board --bins
+
+# Install a branch build on a dev board
+sudo robotctl update apply --ref <branch> daemon
+
+# Push local changes to a board without CI
+scripts/dev-push.sh radxa@<board>
+```
+
+The alias `cargo board` expands to `cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.31`.
+
+### Release Tooling
+
+```bash
+# Package a release artifact
+cargo run -p xtask -- package --version <ver> --bin-dir <dir> --out dist/
+
+# Sign the artifact
+cargo run -p xtask -- sign --dir dist/ --key secret.key
+
+# Promote staging to stable
+cargo run -p xtask -- promote --version <ver> --staging-tag daemon-staging-v<ver> \
+    --stable-tag daemon-v<ver> --repo ORG/REPO --out dist/ --key secret.key
+```
+
+## Architecture
+
+Seven daemons on one board, talking over Unix sockets using JSON-RPC 2.0 (NDJSON framing).
+
+```
+   gamepad          phone          laptop           peer            GitHub release
+      │ BLE/USB        │ BLE            │ ssh             │ WebRTC            │ https
+      ▼                ▼                ▼                 ▼                   │
+  ┌────────┐      ┌────────┐      ┌──────────┐      ┌──────────┐            │
+  │  padd  │      │  btd   │      │ robotctl │      │  mediad  │            │
+  └───┬────┘      └───┬────┘      └────┬─────┘      └────┬─────┘            │
+      │               │  (subset of same API)            │                   │
+      ▼               ▼                ▼                 ▼                   │
+  ┌──────────────────────────────────────────────────────────────────┐        │
+  │   Unix sockets: JSON-RPC 2.0, one object per line               │        │
+  └────┬──────────────────────┬─────────────────────────┬────────────┘        │
+       ▼                      ▼                         ▼                     │
+  ┌───────────┐        ┌─────────────┐           ┌─────────────┐              │
+  │  robotd   │        │  configd    │           │  updaterd   │◄─────────────┘
+  │ robot.*   │        │ net.* pad.* │           │ update.*    │
+  │ 50 Hz     │        │ system.*    │           │ verify/swap │
+  │ loop      │        │ wifi,name   │           │ health gate │
+  └─────┬─────┘        └──────┬──────┘           └──────┬──────┘
+        │ Dynamixel           │ D-Bus                   │ systemctl
+        ▼                     ▼                         ▼
+  15 servos + IMU      BlueZ · NetworkManager    /opt/robot/daemon/current
+```
+
+### Service Roles
+
+| Service | Owns | Key Invariant |
+|---------|------|---------------|
+| `robotd` | Motor control, kinematics, odometry, gait policies, safety, voice | **Authoritative on safety.** Clients send intents; robotd decides what's executable. Control loop never blocks on other services. |
+| `configd` | WiFi, robot identity, pairing PIN, gamepad bonding, reboot | Must survive a dead `robotd` — provisioning is what you need when things are broken. |
+| `updaterd` | Releases: verify signature, atomic swap, health gate, rollback | Cannot restart itself mid-update; restarts 5s after replying. |
+| `btd` | BLE GATT server | **Transport adapter only** — owns no state. Subset of API over BLE. |
+| `padd` | Gamepad → intents | Unprivileged client, no special access. |
+| `mediad` | Camera/mic, WebRTC, remote gateway | Owns the PeerConnection; proxies `control` messages to services. |
+| `tofd` | Head's 8×8 depth sensor (ToF) | Publishes frames, reads nothing. Not part of mediad. |
+
+### Library Crates
+
+- `duck-ipc-proto` — Wire contract (JSON-RPC types). Depends only on serde + semver.
+- `duck-control` — Control core: model, bus, IMU, observations, policy, safety.
+- `kinematics` — MJCF model and forward kinematics.
+- `odometry` — Where the robot has been (from foot contacts + IMU).
+- `sounds` — Synthesis, per-robot voice personality.
+- `pet-detect` — CNN that detects head scratches via onboard mic.
+- `robotd-params` — Startup parameter schema and validation.
+
+### Tool Crates
+
+- `robotctl` — Local CLI on the robot.
+- `duckctl` — Laptop-side BLE client (never cross-built).
+- `xtask` — Package/sign/promote tooling (never shipped).
+- `test-support` — Signed-release fixtures for tests.
+
+## Workspace Structure
+
+```
+default-members = [...]  # Everything except duckctl
+```
+
+`duckctl` is excluded from `default-members` because it's a laptop-side client that should never be cross-compiled for the board. Use `--workspace` to include it explicitly.
+
+## Key Design Decisions
+
+1. **JSON-RPC 2.0 over Unix sockets** — Not D-Bus, not HTTP. Filesystem permissions provide free authorization; `SO_PEERCRED` identifies callers.
+
+2. **Async where it waits, sync where it computes** — CPU-bound work (SHA-256, tar extraction) uses `spawn_blocking`. Fast filesystem ops (symlink rename) are called directly.
+
+3. **Releases are swapped, not patched** — A build lands as a whole directory under `/opt/robot/daemon/releases/<version>/`. `updaterd` verifies, swaps the `current` symlink, restarts units, and health-gates. Unhealthy → automatic rollback.
+
+4. **Intents, not motor writes** — Remote/local clients send velocity, gaze target, "sit" — never raw joint commands. `robotd` remains authoritative on fall detection, joint/thermal limits, safe poses.
+
+5. **Three services survive a dead robotd** — `configd`, `updaterd`, `btd` have no systemd dependency on it. They are the recovery path.
+
+## Conventions
+
+- **Comments say why, not what.** The reason outlives the code.
+- **Every non-obvious decision gets a test**, with a comment naming the failure it prevents.
+- **Reach for an existing crate** before writing a new one.
+- **Commit trailers:** Use `Assisted-by:` (not `Co-Authored-By:`) for AI assistance.
+
+## State Ownership
+
+| State | Location | Survives Update? |
+|-------|----------|------------------|
+| Per-board config (`robotd.toml`, `updater.toml`) | `/etc/robot/` | Yes, never overwritten |
+| Robot identity, name, PIN | `/var/lib/robot/config/config.json` | Yes |
+| WiFi credentials | NetworkManager profiles | Yes (we never store them) |
+| Binaries, policies, shipped defaults | `/opt/robot/daemon/releases/<ver>/` | No — replaced atomically |
+| Live release symlink | `/opt/robot/daemon/current` | No — swapped |
+
+Everything outside `releases/<ver>/` survives both update and rollback. That is the whole rule.
+
+## Logging
+
+Every service logs to stderr via `tracing` → journald. The first line each daemon writes is its identity at `warn` level:
+
+```
+WARN starting service="robotd" build=0.2.0 (rev a1b2c3d, built 2026-07-28T13:50:00Z)
+     exe=/opt/robot/daemon/releases/0.2.0/bin/robotd pid=814
+```
+
+`exe` says which release directory the process launched from — the difference between "update worked" and "symlink moved but systemd still runs old path."
+
+Update history is at `/var/lib/robot/updater/update-log.jsonl`, fsynced and power-loss safe.
+
+## Releasing
+
+Releases are signed **in CI**, never locally.
+
+| Tag | Effect |
+|-----|--------|
+| `daemon-staging-v0.4.0` (pre-release) | Build, sign, publish to **staging** |
+| `daemon-v0.4.0` (release) | **Promote** staging 0.4.0 (same bytes, re-signed), or build directly if no staging exists |
+
+Bump workspace version first — `xtask package` refuses a tag that disagrees with `Cargo.toml`.
+
+## Rust Version
+
+Requires Rust **1.89+** (stable). Edition 2024. The `rust-version` field in `Cargo.toml` enforces this.
+
+## ONNX Runtime
+
+`robotd` dlopens ONNX Runtime to run policies. Versions are pinned in `Cargo.toml`:
+- `floor`: minimum `ort` accepts (raise with `ort` dependency)
+- `target`: what gets installed when a board is below floor
+
+A test asserts `scripts/setup-board.sh` agrees with these values.
+
+## Documentation
+
+- [`docs/design/`](docs/design/) — How things work and why. When behavior and a design doc disagree, the doc is the bug.
+- [`docs/project/`](docs/project/) — Dated records, roadmap, what went wrong.
+- [`docs/robot/`](docs/robot/) — Using a robot, cheat sheets, dev setup.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — Building, testing, layout, conventions, releasing.

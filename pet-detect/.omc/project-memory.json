@@ -1,0 +1,113 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1790500142670,
+  "projectRoot": "/home/jason/Workspaces/microduck/pet-detect",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Rust",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Cargo.toml"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "cargo",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "cargo build",
+    "testCommand": "cargo test",
+    "lintCommand": "cargo clippy",
+    "devCommand": "cargo run",
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "src"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 0,
+      "lastAccessed": 1790500142666,
+      "keyFiles": []
+    },
+    "models": {
+      "path": "models",
+      "purpose": "Data models",
+      "fileCount": 1,
+      "lastAccessed": 1790500142667,
+      "keyFiles": [
+        "pet_detect.onnx"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 2,
+      "lastAccessed": 1790500142667,
+      "keyFiles": [
+        "lib.rs",
+        "worker.rs"
+      ]
+    },
+    "training": {
+      "path": "training",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1790500142668,
+      "keyFiles": [
+        "train.py"
+      ]
+    },
+    "src/bin": {
+      "path": "src/bin",
+      "purpose": "Executable scripts",
+      "fileCount": 2,
+      "lastAccessed": 1790500142669,
+      "keyFiles": [
+        "detect.rs",
+        "features.rs"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "training/download_open_datasets.py",
+      "accessCount": 1,
+      "lastAccessed": 1790515212047,
+      "type": "file"
+    },
+    {
+      "path": "training/process_cry_dataset.py",
+      "accessCount": 1,
+      "lastAccessed": 1790518367526,
+      "type": "file"
+    },
+    {
+      "path": "src/worker.rs",
+      "accessCount": 1,
+      "lastAccessed": 1790569691506,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

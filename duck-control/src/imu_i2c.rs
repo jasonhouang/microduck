@@ -14,7 +14,7 @@ use std::time::Duration;
 use i2cdev::core::*;
 use i2cdev::linux::LinuxI2CDevice;
 
-use crate::imu::{ImuData, SflpDecoder};
+use crate::imu::{ImuData, SflpDecoder, rotate};
 use crate::io::ImuStale;
 
 /// 7-bit I²C address, SDO/SA0 tied low (i2c-4).
@@ -52,7 +52,8 @@ const SFLP_GAME_TAG: u8 = 0x17;
 const FIFO_ENTRY_LEN: usize = 7;
 
 /// How long to wait for the SFLP algorithm to bootstrap after enablement.
-const SFLP_STARTUP: Duration = Duration::from_millis(300);
+/// SFLP needs time to estimate gyro bias; 2 seconds with the sensor stationary is the minimum.
+const SFLP_STARTUP: Duration = Duration::from_secs(2);
 
 /// Sensor sample rate — both accel/gyro and SFLP.
 const ODR_HZ: u8 = 0x04; // 30 Hz
@@ -89,6 +90,7 @@ pub struct Lsm6dsv16x {
     dev: LinuxI2CDevice,
     decoder: SflpDecoder,
     stale: ImuStale,
+    last_data: ImuData,
 }
 
 /// Max retries per I²C transaction — the bus is intermittently lossy without pull-ups.
@@ -164,10 +166,13 @@ impl Lsm6dsv16x {
         // Accel full scale: 4 g (CTRL8 bits 0-1 = 0x1).
         write_reg(&mut dev, CTRL8, 0x01).map_err(|e| format!("CTRL8: {e}"))?;
 
-        // FIFO watermark = 7 bytes (one SFLP entry).
-        write_reg(&mut dev, FIFO_CTRL1, FIFO_ENTRY_LEN as u8)
+        // FIFO watermark = 64 bytes (enough for ~9 entries of mixed accel/gyro/SFLP).
+        // With accel, gyro, and SFLP all batching at 30 Hz, the FIFO fills quickly.
+        // A larger watermark prevents overflow and ensures we can find SFLP entries.
+        write_reg(&mut dev, FIFO_CTRL1, 64)
             .map_err(|e| format!("FIFO_CTRL1: {e}"))?;
         // Batch accel at 30 Hz (low nibble), gyro at 30 Hz (high nibble).
+        // SFLP needs this data in FIFO as input to compute the quaternion.
         write_reg(&mut dev, FIFO_CTRL3, (ODR_HZ << 4) | ODR_HZ)
             .map_err(|e| format!("FIFO_CTRL3: {e}"))?;
         // FIFO stream mode (bits 0-2 = 0x6).
@@ -197,47 +202,80 @@ impl Lsm6dsv16x {
             dev,
             decoder: SflpDecoder::default(),
             stale: ImuStale::default(),
+            last_data: ImuData::default(),
         })
     }
 
     /// Read one sample: SFLP quaternion from the FIFO, raw gyro from the output registers.
-    /// Returns `None` if the FIFO has no complete entry yet.
+    /// Returns the last good reading if the FIFO has no new data yet.
     pub fn read(&mut self) -> Option<ImuData> {
-        // Drain non-game-rotation entries until we find the SFLP tag or exhaust the FIFO.
+        // Check FIFO level first — if not enough data, return last good reading.
+        let lo = read_reg(&mut self.dev, FIFO_STATUS1).ok()?;
+        let hi = read_reg(&mut self.dev, FIFO_STATUS2).ok()?;
+        let level = ((hi as u16 & 0x01) << 8) | lo as u16;
+        if level < FIFO_ENTRY_LEN as u16 {
+            return Some(self.last_data);
+        }
+
+        // Read FIFO entries until we find an SFLP game rotation tag (0x17).
+        // Read up to 16 entries to avoid infinite loops.
         let mut fifo = [0u8; FIFO_ENTRY_LEN];
-        loop {
+        let mut sflp_entry: Option<[u8; 6]> = None;
+
+        for _ in 0..16 {
+            if self.dev.write(&[FIFO_DATA_OUT_TAG]).is_err()
+                || self.dev.read(&mut fifo).is_err()
+            {
+                break;
+            }
+
+            if fifo[0] == SFLP_GAME_TAG {
+                sflp_entry = Some([fifo[1], fifo[2], fifo[3], fifo[4], fifo[5], fifo[6]]);
+                break; // Found SFLP, stop reading
+            }
+
+            // Check if there's more data
             let lo = read_reg(&mut self.dev, FIFO_STATUS1).ok()?;
             let hi = read_reg(&mut self.dev, FIFO_STATUS2).ok()?;
             let level = ((hi as u16 & 0x01) << 8) | lo as u16;
             if level < FIFO_ENTRY_LEN as u16 {
-                return None;
-            }
-            if self.dev.write(&[FIFO_DATA_OUT_TAG]).is_err()
-                || self.dev.read(&mut fifo).is_err()
-            {
-                return None;
-            }
-            if fifo[0] == SFLP_GAME_TAG {
-                break;
+                break; // FIFO empty
             }
         }
 
-        // The 0x17 payload is a game rotation vector: 3 × i16 LE, scale 2⁻¹⁵.
-        // ST's game rotation vector components are (axis · sin(α/2)), which are
-        // exactly the quaternion imaginary parts (qx, qy, qz). The decoder
-        // recovers w = √(1 − x² − y² − z²) — no conversion needed here.
-        let rotvec_bytes = &fifo[1..7];
-        let qx = i16::from_le_bytes([rotvec_bytes[0], rotvec_bytes[1]]) as f64 / 32768.0;
-        let qy = i16::from_le_bytes([rotvec_bytes[2], rotvec_bytes[3]]) as f64 / 32768.0;
-        let qz = i16::from_le_bytes([rotvec_bytes[4], rotvec_bytes[5]]) as f64 / 32768.0;
+        // Use the SFLP entry we found, or return last good reading if none found
+        let quat_bytes = match sflp_entry {
+            Some(entry) => entry,
+            None => return Some(self.last_data),
+        };
+        let qx = i16::from_le_bytes([quat_bytes[0], quat_bytes[1]]) as f64 / 32768.0;
+        let qy = i16::from_le_bytes([quat_bytes[2], quat_bytes[3]]) as f64 / 32768.0;
+        let qz = i16::from_le_bytes([quat_bytes[4], quat_bytes[5]]) as f64 / 32768.0;
+        tracing::info!("SFLP raw: qx={} qy={} qz={}", qx, qy, qz);
 
         // Read raw gyro (6 bytes from OUT_GYRO_X_L).
         let mut gyro = [0u8; 6];
         if self.dev.write(&[OUT_GYRO_X_L]).is_err()
             || self.dev.read(&mut gyro).is_err()
         {
-            return None;
+            return Some(self.last_data);
         }
+
+        // Read raw accel for comparison
+        let mut accel = [0u8; 6];
+        if self.dev.write(&[0x28]).is_err()
+            || self.dev.read(&mut accel).is_err()
+        {
+            return Some(self.last_data);
+        }
+        let ax = i16::from_le_bytes([accel[0], accel[1]]) as f64 / 8192.0;
+        let ay = i16::from_le_bytes([accel[2], accel[3]]) as f64 / 8192.0;
+        let az = i16::from_le_bytes([accel[4], accel[5]]) as f64 / 8192.0;
+
+        // Rotate accel from sensor frame to trunk frame (same as gyro)
+        let mount = SflpDecoder::DEFAULT_MOUNT;
+        let accel_sensor = [ax, ay, az];
+        let accel_trunk = rotate(mount, accel_sensor);
 
         // Build the 12-byte block the decoder expects:
         // [gyro_x(2), gyro_y(2), gyro_z(2), quat_x(2), quat_y(2), quat_z(2)]
@@ -248,13 +286,32 @@ impl Lsm6dsv16x {
         block[10..12].copy_from_slice(&f32_to_f16(qz));
 
         let data = self.decoder.decode(&block);
+
+        // Override gravity with accelerometer-based calculation (more reliable than SFLP)
+        // Accelerometer measures specific force (upward), but gravity points downward
+        let accel_magnitude = (accel_trunk[0] * accel_trunk[0] + accel_trunk[1] * accel_trunk[1] + accel_trunk[2] * accel_trunk[2]).sqrt();
+        let gravity_from_accel = if accel_magnitude > 0.1 {
+            // Negate: accelerometer reads +1g upward when stationary, but gravity is downward
+            [-accel_trunk[0] / accel_magnitude, -accel_trunk[1] / accel_magnitude, -accel_trunk[2] / accel_magnitude]
+        } else {
+            data.gravity  // Fall back to SFLP if accel is too weak
+        };
+
+        let final_data = ImuData {
+            gyro: data.gyro,
+            gravity: gravity_from_accel,
+            quat: data.quat,
+        };
+
         if self.decoder.ready() {
             self.stale.run = 0;
         } else {
             self.stale.total += 1;
             self.stale.run += 1;
         }
-        Some(data)
+        // Always update last_data with accelerometer-based gravity
+        self.last_data = final_data;
+        Some(self.last_data)
     }
 
     pub fn ready(&self) -> bool {

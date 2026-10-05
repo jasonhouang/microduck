@@ -1,0 +1,1023 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1791197276751,
+  "projectRoot": "/home/jason/Workspaces/microduck",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Rust",
+        "version": "1.99",
+        "confidence": "high",
+        "markers": [
+          "Cargo.toml"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "cargo",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "cargo build",
+    "testCommand": "cargo test",
+    "lintCommand": "cargo clippy",
+    "devCommand": "cargo run",
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [
+    {
+      "timestamp": 1790491645334,
+      "source": "manual",
+      "category": "build",
+      "content": "zig compiler location: /home/jason/opt/zig/zig. When running cargo-zigbuild or dev-push.sh, use PATH=/home/jason/opt/zig:$PATH"
+    },
+    {
+      "timestamp": 1790871306085,
+      "source": "manual",
+      "category": "conventions",
+      "content": "Xbox 手柄配对后如果灯快闪但无法控制：\n\n1. 先用 `robotctl pad pair` 配对（不要直接用 bluetoothctl）\n2. 如果配对后灯还在闪，需要重连蓝牙：\n   ```bash\n   sudo bluetoothctl disconnect <手柄MAC>\n   sudo bluetoothctl connect <手柄MAC>\n   ```\n3. 连接成功后会出现 /dev/input/js0，xpadneo 驱动加载\n\n关键点：`robotctl pad pair` 只完成 BLE 配对，HID 连接可能需要额外 bluetoothctl 重连。"
+    }
+  ],
+  "directoryMap": {
+    "btd": {
+      "path": "btd",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276737,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "configd": {
+      "path": "configd",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276742,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "deploy": {
+      "path": "deploy",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1791197276742,
+      "keyFiles": [
+        "README.md",
+        "robotd.toml",
+        "updater.toml"
+      ]
+    },
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 6,
+      "lastAccessed": 1791197276742,
+      "keyFiles": [
+        "0.15.0-dev.local.1791050909.gabc5299.manifest.json",
+        "0.15.0-dev.local.1791050909.gabc5299.manifest.json.minisig",
+        "daemon-0.15.0-dev.local.1791050909.gabc5299.tar.zst",
+        "daemon-0.15.0-dev.local.1791050909.gabc5299.tar.zst.minisig",
+        "manifest.json"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 4,
+      "lastAccessed": 1791197276742,
+      "keyFiles": [
+        "README.md",
+        "faq.md",
+        "policy-manifest.md",
+        "recurrent-policies.md"
+      ]
+    },
+    "duck-ble": {
+      "path": "duck-ble",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276743,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "duck-control": {
+      "path": "duck-control",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276743,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "duck-detect": {
+      "path": "duck-detect",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276743,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "duck-ether": {
+      "path": "duck-ether",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276743,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "duck-ipc-proto": {
+      "path": "duck-ipc-proto",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276743,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "duckctl": {
+      "path": "duckctl",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276743,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "hooks": {
+      "path": "hooks",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1791197276743,
+      "keyFiles": [
+        "postinstall",
+        "preinstall.in"
+      ]
+    },
+    "kinematics": {
+      "path": "kinematics",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276743,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "mediad": {
+      "path": "mediad",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276744,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "odometry": {
+      "path": "odometry",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276744,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "pad-imu": {
+      "path": "pad-imu",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276744,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "padd": {
+      "path": "padd",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276744,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "pet-detect": {
+      "path": "pet-detect",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1791197276744,
+      "keyFiles": [
+        "Cargo.toml",
+        "README.md"
+      ]
+    },
+    "robotctl": {
+      "path": "robotctl",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276744,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "robotd": {
+      "path": "robotd",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276744,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "robotd-params": {
+      "path": "robotd-params",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276744,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 32,
+      "lastAccessed": 1791197276745,
+      "keyFiles": [
+        "bake-duck-mesh.py",
+        "board-test.sh",
+        "ci-release-notes.sh",
+        "cross-sysroot.sh",
+        "dev-build.Dockerfile"
+      ]
+    },
+    "sounds": {
+      "path": "sounds",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276745,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "spaces": {
+      "path": "spaces",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1791197276745,
+      "keyFiles": []
+    },
+    "staged": {
+      "path": "staged",
+      "purpose": null,
+      "fileCount": 11,
+      "lastAccessed": 1791197276745,
+      "keyFiles": [
+        "btd",
+        "configd",
+        "mediad",
+        "padd",
+        "pet-detect"
+      ]
+    },
+    "target": {
+      "path": "target",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1791197276745,
+      "keyFiles": [
+        "CACHEDIR.TAG"
+      ]
+    },
+    "test-support": {
+      "path": "test-support",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276745,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "tof": {
+      "path": "tof",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1791197276745,
+      "keyFiles": [
+        "Cargo.toml",
+        "build.rs"
+      ]
+    },
+    "updater": {
+      "path": "updater",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1791197276745,
+      "keyFiles": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "updater.example.toml"
+      ]
+    },
+    "uyvy": {
+      "path": "uyvy",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276745,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "xtask": {
+      "path": "xtask",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1791197276745,
+      "keyFiles": [
+        "Cargo.toml"
+      ]
+    },
+    "btd/src": {
+      "path": "btd/src",
+      "purpose": "Source code",
+      "fileCount": 9,
+      "lastAccessed": 1791197276746,
+      "keyFiles": [
+        "bluez.rs",
+        "chorale.rs",
+        "lib.rs"
+      ]
+    },
+    "configd/src": {
+      "path": "configd/src",
+      "purpose": "Source code",
+      "fileCount": 11,
+      "lastAccessed": 1791197276746,
+      "keyFiles": [
+        "bluez.rs",
+        "identity.rs",
+        "lib.rs"
+      ]
+    },
+    "duck-ble/src": {
+      "path": "duck-ble/src",
+      "purpose": "Source code",
+      "fileCount": 4,
+      "lastAccessed": 1791197276746,
+      "keyFiles": [
+        "adv.rs",
+        "framing.rs",
+        "gatt.rs"
+      ]
+    },
+    "duck-control/examples": {
+      "path": "duck-control/examples",
+      "purpose": "Example code",
+      "fileCount": 6,
+      "lastAccessed": 1791197276746,
+      "keyFiles": [
+        "bus-timing.rs",
+        "ft-scan.rs",
+        "ft-test.rs"
+      ]
+    },
+    "duck-control/src": {
+      "path": "duck-control/src",
+      "purpose": "Source code",
+      "fileCount": 11,
+      "lastAccessed": 1791197276746,
+      "keyFiles": [
+        "bus.rs",
+        "fall.rs",
+        "imu.rs"
+      ]
+    },
+    "duck-control/tests": {
+      "path": "duck-control/tests",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1791197276746,
+      "keyFiles": [
+        "recurrent_policy.rs"
+      ]
+    },
+    "duck-detect/src": {
+      "path": "duck-detect/src",
+      "purpose": "Source code",
+      "fileCount": 3,
+      "lastAccessed": 1791197276746,
+      "keyFiles": [
+        "lib.rs",
+        "onnx.rs",
+        "rknn.rs"
+      ]
+    },
+    "duck-ether/src": {
+      "path": "duck-ether/src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1791197276747,
+      "keyFiles": [
+        "main.rs"
+      ]
+    },
+    "duck-ipc-proto/src": {
+      "path": "duck-ipc-proto/src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1791197276747,
+      "keyFiles": [
+        "lib.rs"
+      ]
+    },
+    "duckctl/examples": {
+      "path": "duckctl/examples",
+      "purpose": "Example code",
+      "fileCount": 1,
+      "lastAccessed": 1791197276747,
+      "keyFiles": [
+        "advwatch.rs"
+      ]
+    },
+    "duckctl/src": {
+      "path": "duckctl/src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1791197276747,
+      "keyFiles": [
+        "main.rs"
+      ]
+    },
+    "kinematics/assets": {
+      "path": "kinematics/assets",
+      "purpose": "Static assets",
+      "fileCount": 0,
+      "lastAccessed": 1791197276747,
+      "keyFiles": []
+    },
+    "kinematics/src": {
+      "path": "kinematics/src",
+      "purpose": "Source code",
+      "fileCount": 6,
+      "lastAccessed": 1791197276747,
+      "keyFiles": [
+        "hand.rs",
+        "head.rs",
+        "lib.rs"
+      ]
+    },
+    "kinematics/tests": {
+      "path": "kinematics/tests",
+      "purpose": "Test files",
+      "fileCount": 2,
+      "lastAccessed": 1791197276747,
+      "keyFiles": [
+        "fk_against_mujoco.rs",
+        "perf_probe.rs"
+      ]
+    },
+    "mediad/src": {
+      "path": "mediad/src",
+      "purpose": "Source code",
+      "fileCount": 17,
+      "lastAccessed": 1791197276748,
+      "keyFiles": [
+        "camera.rs",
+        "config.rs",
+        "detect.rs"
+      ]
+    },
+    "odometry/src": {
+      "path": "odometry/src",
+      "purpose": "Source code",
+      "fileCount": 2,
+      "lastAccessed": 1791197276748,
+      "keyFiles": [
+        "anchors.rs",
+        "lib.rs"
+      ]
+    },
+    "pad-imu/src": {
+      "path": "pad-imu/src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1791197276748,
+      "keyFiles": [
+        "lib.rs"
+      ]
+    },
+    "padd/src": {
+      "path": "padd/src",
+      "purpose": "Source code",
+      "fileCount": 2,
+      "lastAccessed": 1791197276748,
+      "keyFiles": [
+        "main.rs",
+        "tap.rs"
+      ]
+    },
+    "pet-detect/data": {
+      "path": "pet-detect/data",
+      "purpose": "Data files",
+      "fileCount": 0,
+      "lastAccessed": 1791197276748,
+      "keyFiles": []
+    },
+    "pet-detect/models": {
+      "path": "pet-detect/models",
+      "purpose": "Data models",
+      "fileCount": 1,
+      "lastAccessed": 1791197276749,
+      "keyFiles": [
+        "pet_detect.onnx"
+      ]
+    },
+    "pet-detect/src": {
+      "path": "pet-detect/src",
+      "purpose": "Source code",
+      "fileCount": 2,
+      "lastAccessed": 1791197276749,
+      "keyFiles": [
+        "lib.rs",
+        "worker.rs"
+      ]
+    },
+    "robotctl/assets": {
+      "path": "robotctl/assets",
+      "purpose": "Static assets",
+      "fileCount": 1,
+      "lastAccessed": 1791197276749,
+      "keyFiles": [
+        "duck.bin"
+      ]
+    },
+    "robotctl/src": {
+      "path": "robotctl/src",
+      "purpose": "Source code",
+      "fileCount": 10,
+      "lastAccessed": 1791197276749,
+      "keyFiles": [
+        "camera.rs",
+        "cells.rs",
+        "configure.rs"
+      ]
+    },
+    "robotd/src": {
+      "path": "robotd/src",
+      "purpose": "Source code",
+      "fileCount": 8,
+      "lastAccessed": 1791197276749,
+      "keyFiles": [
+        "chorale.rs",
+        "control.rs",
+        "intents.rs"
+      ]
+    },
+    "robotd/tests": {
+      "path": "robotd/tests",
+      "purpose": "Test files",
+      "fileCount": 2,
+      "lastAccessed": 1791197276749,
+      "keyFiles": [
+        "single_instance.rs",
+        "updater_gate.rs"
+      ]
+    },
+    "robotd-params/src": {
+      "path": "robotd-params/src",
+      "purpose": "Source code",
+      "fileCount": 3,
+      "lastAccessed": 1791197276749,
+      "keyFiles": [
+        "edit.rs",
+        "lib.rs",
+        "registry.rs"
+      ]
+    },
+    "sounds/src": {
+      "path": "sounds/src",
+      "purpose": "Source code",
+      "fileCount": 7,
+      "lastAccessed": 1791197276749,
+      "keyFiles": [
+        "lib.rs",
+        "main.rs",
+        "personality.rs"
+      ]
+    },
+    "test-support/examples": {
+      "path": "test-support/examples",
+      "purpose": "Example code",
+      "fileCount": 2,
+      "lastAccessed": 1791197276750,
+      "keyFiles": [
+        "fake-release.rs",
+        "systemd-fixture.rs"
+      ]
+    },
+    "test-support/src": {
+      "path": "test-support/src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1791197276750,
+      "keyFiles": [
+        "lib.rs"
+      ]
+    },
+    "tof/src": {
+      "path": "tof/src",
+      "purpose": "Source code",
+      "fileCount": 5,
+      "lastAccessed": 1791197276750,
+      "keyFiles": [
+        "config.rs",
+        "lib.rs",
+        "main.rs"
+      ]
+    },
+    "tof/vendor": {
+      "path": "tof/vendor",
+      "purpose": "Third-party code",
+      "fileCount": 3,
+      "lastAccessed": 1791197276750,
+      "keyFiles": [
+        "LICENSE.txt",
+        "platform.c",
+        "probe.c"
+      ]
+    },
+    "updater/src": {
+      "path": "updater/src",
+      "purpose": "Source code",
+      "fileCount": 21,
+      "lastAccessed": 1791197276750,
+      "keyFiles": [
+        "account.rs",
+        "config.rs",
+        "engine.rs"
+      ]
+    },
+    "updater/tests": {
+      "path": "updater/tests",
+      "purpose": "Test files",
+      "fileCount": 4,
+      "lastAccessed": 1791197276750,
+      "keyFiles": [
+        "apply.rs",
+        "download.rs",
+        "install.rs"
+      ]
+    },
+    "uyvy/src": {
+      "path": "uyvy/src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1791197276751,
+      "keyFiles": [
+        "lib.rs"
+      ]
+    },
+    "xtask/src": {
+      "path": "xtask/src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1791197276751,
+      "keyFiles": [
+        "main.rs"
+      ]
+    },
+    "xtask/tests": {
+      "path": "xtask/tests",
+      "purpose": "Test files",
+      "fileCount": 3,
+      "lastAccessed": 1791197276751,
+      "keyFiles": [
+        "artifact.rs",
+        "rescue.rs",
+        "sideload.rs"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "robotd/src/main.rs",
+      "accessCount": 100,
+      "lastAccessed": 1791206978601,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/src/bus.rs",
+      "accessCount": 63,
+      "lastAccessed": 1791206866911,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/src/imu.rs",
+      "accessCount": 57,
+      "lastAccessed": 1791209330465,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/src/model.rs",
+      "accessCount": 40,
+      "lastAccessed": 1791200651180,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 24,
+      "lastAccessed": 1791104354185,
+      "type": "directory"
+    },
+    {
+      "path": "duck-control/src/feetech/servo.rs",
+      "accessCount": 17,
+      "lastAccessed": 1791033668914,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/src",
+      "accessCount": 13,
+      "lastAccessed": 1791208137578,
+      "type": "directory"
+    },
+    {
+      "path": "duck-control/src/feetech/registers.rs",
+      "accessCount": 12,
+      "lastAccessed": 1791174023589,
+      "type": "file"
+    },
+    {
+      "path": "deploy/robotd.toml",
+      "accessCount": 11,
+      "lastAccessed": 1791029077459,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/Cargo.toml",
+      "accessCount": 8,
+      "lastAccessed": 1791033450709,
+      "type": "file"
+    },
+    {
+      "path": "docs/robot/pair-a-gamepad.md",
+      "accessCount": 6,
+      "lastAccessed": 1790871353431,
+      "type": "file"
+    },
+    {
+      "path": "scripts/setup-board.sh",
+      "accessCount": 6,
+      "lastAccessed": 1791008019230,
+      "type": "file"
+    },
+    {
+      "path": "robotd-params/src",
+      "accessCount": 6,
+      "lastAccessed": 1791022998481,
+      "type": "directory"
+    },
+    {
+      "path": "scripts/setup-xpadneo.sh",
+      "accessCount": 4,
+      "lastAccessed": 1790603903532,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/src/io.rs",
+      "accessCount": 4,
+      "lastAccessed": 1791012017072,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/src/lib.rs",
+      "accessCount": 4,
+      "lastAccessed": 1791012096727,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/examples/ft-scan.rs",
+      "accessCount": 4,
+      "lastAccessed": 1791021486379,
+      "type": "file"
+    },
+    {
+      "path": "scripts/dev-push.sh",
+      "accessCount": 4,
+      "lastAccessed": 1791204624300,
+      "type": "file"
+    },
+    {
+      "path": "pet-detect/training/test_model.py",
+      "accessCount": 3,
+      "lastAccessed": 1790593889028,
+      "type": "file"
+    },
+    {
+      "path": "pet-detect/src/lib.rs",
+      "accessCount": 3,
+      "lastAccessed": 1790593991949,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/src/feetech/error.rs",
+      "accessCount": 3,
+      "lastAccessed": 1791033442833,
+      "type": "file"
+    },
+    {
+      "path": "pet-detect/training/train.py",
+      "accessCount": 2,
+      "lastAccessed": 1790593767294,
+      "type": "directory"
+    },
+    {
+      "path": "mediad/src/detect.rs",
+      "accessCount": 2,
+      "lastAccessed": 1790878180401,
+      "type": "file"
+    },
+    {
+      "path": "duck-ipc-proto/src/lib.rs",
+      "accessCount": 2,
+      "lastAccessed": 1791098279835,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/src/feetech/protocol.rs",
+      "accessCount": 2,
+      "lastAccessed": 1791188148558,
+      "type": "file"
+    },
+    {
+      "path": ".cargo/config.toml",
+      "accessCount": 1,
+      "lastAccessed": 1790601550795,
+      "type": "file"
+    },
+    {
+      "path": "Cargo.toml",
+      "accessCount": 1,
+      "lastAccessed": 1790601550820,
+      "type": "file"
+    },
+    {
+      "path": "scripts/cross-sysroot.sh",
+      "accessCount": 1,
+      "lastAccessed": 1790601561404,
+      "type": "file"
+    },
+    {
+      "path": "deploy/audio/max98357a-dkms/dkms.conf",
+      "accessCount": 1,
+      "lastAccessed": 1790602964347,
+      "type": "file"
+    },
+    {
+      "path": "deploy/audio/max98357a-dkms/Makefile",
+      "accessCount": 1,
+      "lastAccessed": 1790602964389,
+      "type": "file"
+    },
+    {
+      "path": "deploy/audio/inmp441-dkms/dkms.conf",
+      "accessCount": 1,
+      "lastAccessed": 1790602964447,
+      "type": "file"
+    },
+    {
+      "path": "deploy/hid-xpadneo-dkms/dkms.conf",
+      "accessCount": 1,
+      "lastAccessed": 1790602993254,
+      "type": "file"
+    },
+    {
+      "path": "deploy/hid-xpadneo-dkms/src/Makefile",
+      "accessCount": 1,
+      "lastAccessed": 1790602995464,
+      "type": "file"
+    },
+    {
+      "path": "scripts/setup-i2s-audio.sh",
+      "accessCount": 1,
+      "lastAccessed": 1790603225929,
+      "type": "file"
+    },
+    {
+      "path": "padd/src/main.rs",
+      "accessCount": 1,
+      "lastAccessed": 1790607085963,
+      "type": "file"
+    },
+    {
+      "path": "docs/project/pad-minimal-pairing.md",
+      "accessCount": 1,
+      "lastAccessed": 1790614514218,
+      "type": "file"
+    },
+    {
+      "path": "docs/design/mobile-app.md",
+      "accessCount": 1,
+      "lastAccessed": 1790684770846,
+      "type": "file"
+    },
+    {
+      "path": "docs/design/app-path-design.md",
+      "accessCount": 1,
+      "lastAccessed": 1790684771025,
+      "type": "file"
+    },
+    {
+      "path": "docs/design/webrtc-console.md",
+      "accessCount": 1,
+      "lastAccessed": 1790824145441,
+      "type": "file"
+    },
+    {
+      "path": "docs/design/remote-webrtc.md",
+      "accessCount": 1,
+      "lastAccessed": 1790824145507,
+      "type": "file"
+    },
+    {
+      "path": "mediad/src",
+      "accessCount": 1,
+      "lastAccessed": 1790835108929,
+      "type": "directory"
+    },
+    {
+      "path": "duck-detect/src/rknn.rs",
+      "accessCount": 1,
+      "lastAccessed": 1790878180240,
+      "type": "file"
+    },
+    {
+      "path": "duck-detect/src/lib.rs",
+      "accessCount": 1,
+      "lastAccessed": 1790878180319,
+      "type": "file"
+    },
+    {
+      "path": "kinematics/src/head.rs",
+      "accessCount": 1,
+      "lastAccessed": 1790879183972,
+      "type": "file"
+    },
+    {
+      "path": "duck-control/src/feetech/mod.rs",
+      "accessCount": 1,
+      "lastAccessed": 1790880080989,
+      "type": "file"
+    },
+    {
+      "path": "duck-ipc-proto",
+      "accessCount": 1,
+      "lastAccessed": 1790941788544,
+      "type": "directory"
+    },
+    {
+      "path": "LICENSE",
+      "accessCount": 1,
+      "lastAccessed": 1791001913992,
+      "type": "file"
+    },
+    {
+      "path": "tof/vendor/LICENSE.txt",
+      "accessCount": 1,
+      "lastAccessed": 1791001914055,
+      "type": "file"
+    },
+    {
+      "path": "scripts/board-test.sh",
+      "accessCount": 1,
+      "lastAccessed": 1791008019290,
+      "type": "directory"
+    },
+    {
+      "path": "tof/src/imu/mod.rs",
+      "accessCount": 1,
+      "lastAccessed": 1791010336735,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

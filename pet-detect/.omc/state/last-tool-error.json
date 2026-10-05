@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"ssh magic@192.168.8.17 \\\"sudo mv /tmp/robotd /opt/robot/daemon/current/bin/ && sudo systemctl restart robotd\\\"\",\"description\":\"Deploy robotd and restart service\"}",
+  "error": "Exit code 1\nJob for robotd.service failed because the control process exited with error code.\nSee \"systemctl status robotd.service\" and \"journalctl -xeu robotd.service\" for details.",
+  "timestamp": "2026-09-28T04:31:54.499Z",
+  "retry_count": 2
+}

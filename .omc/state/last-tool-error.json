@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"ssh magic@192.168.8.17 'robotctl health 2>&1 | grep -A 5 -i gravity' 2>&1\",\"description\":\"Check gravity from health command\"}",
+  "error": "Exit code 1",
+  "timestamp": "2026-10-05T13:33:38.739Z",
+  "retry_count": 2
+}

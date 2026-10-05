@@ -1787,9 +1787,12 @@ impl View {
         // green for confirmed floor — so what the sensor sees is drawn where it
         // sees it, and the view zooms out just enough to keep them in frame.
         let markers = self.tof_markers();
+        // Negate joints for 3D visualization: state.joints is in physical convention
+        // (from servos), but the 3D model expects simulation convention.
+        let joints_sim_convention: Vec<f64> = state.joints.iter().map(|&j| -j).collect();
         self.duck.draw(
             model,
-            &state.joints,
+            &joints_sim_convention,
             state.safety.gravity,
             &markers,
             inner,
