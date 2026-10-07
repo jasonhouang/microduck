@@ -243,6 +243,11 @@ pub const REGISTRY: &[Entry] = &[
         Kind::Float,
         "Reference voltage the gains were identified at",
     ),
+    entry(
+        "policy.record_csv",
+        Kind::OptionalPath,
+        "Record observation and action to CSV every control tick",
+    ),
     // ── [safety] ─────────────────────────────────────────────────────────────
     entry(
         "safety.fall_gravity_z",

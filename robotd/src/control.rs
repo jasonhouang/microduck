@@ -33,8 +33,9 @@
 //! the active state every tick — same values on every path that matters, no leftovers.
 
 use duck_control::model::{DEFAULT_POSITION, NUM_JOINTS};
-use duck_control::obs::{ACTION_LEN, Command, Observation};
+use duck_control::obs::{ACTION_LEN, OBS_LEN, Command, Observation};
 use duck_control::policy::{Net, Policy, PolicyError};
+use std::io::Write;
 
 /// Joint indices the head low-pass covers: neck_pitch, head_pitch, head_yaw, head_roll.
 const HEAD_JOINTS: std::ops::Range<usize> = 5..9;
@@ -231,10 +232,25 @@ pub struct Controller {
     sit: Sit,
     /// The network the last [`Self::step`] ran. `None` before the first.
     last_net: Option<Net>,
+    /// CSV buffer for recording model input/output data. `None` when recording is disabled.
+    csv_buffer: Option<Vec<String>>,
+    /// CSV path template for creating new files on each Start.
+    csv_path: Option<String>,
+    /// Step counter for CSV recording.
+    csv_step: u64,
+    /// Cumulative time for CSV recording.
+    csv_time: f64,
 }
 
 impl Controller {
-    pub fn new(policy: Policy, tuning: Tuning, skills: SkillTuning) -> Self {
+    pub fn new(policy: Policy, tuning: Tuning, skills: SkillTuning, csv_path: Option<&str>) -> Self {
+        let csv_path_owned = csv_path.map(|p| p.to_string());
+        let csv_buffer = if csv_path.is_some() {
+            Some(Vec::new())
+        } else {
+            None
+        };
+
         Self {
             policy,
             tuning,
@@ -245,6 +261,87 @@ impl Controller {
             active: None,
             sit: Sit::Up,
             last_net: None,
+            csv_buffer,
+            csv_path: csv_path_owned,
+            csv_step: 0,
+            csv_time: 0.0,
+        }
+    }
+
+    /// Write CSV buffer to file with timestamp (called on Stop).
+    fn flush_csv_to_file(buffer: &[String], path: &str) {
+        // Ensure parent directory exists
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            if !parent.exists() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!(error = %e, dir = ?parent, "failed to create CSV directory");
+                    return;
+                }
+            }
+        }
+
+        // Add timestamp to filename
+        let timestamped_path = if let Some(dot_pos) = path.rfind('.') {
+            let (base, ext) = path.split_at(dot_pos);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            format!("{}_{}.{}", base, now, &ext[1..])
+        } else {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            format!("{}_{}", path, now)
+        };
+
+        match std::fs::File::create(&timestamped_path) {
+            Ok(mut file) => {
+                // Write CSV header
+                let mut header = String::from("step,time");
+                for i in 0..OBS_LEN {
+                    header.push_str(&format!(",obs_{}", i));
+                }
+                for i in 0..ACTION_LEN {
+                    header.push_str(&format!(",action_{}", i));
+                }
+                header.push('\n');
+                if let Err(e) = file.write_all(header.as_bytes()) {
+                    tracing::warn!(error = %e, path = timestamped_path, "failed to write CSV header");
+                    return;
+                }
+                // Write all buffered rows
+                for line in buffer {
+                    if let Err(e) = file.write_all(line.as_bytes()) {
+                        tracing::warn!(error = %e, "failed to write CSV row");
+                    }
+                }
+                tracing::info!(path = timestamped_path, rows = buffer.len(), "CSV recording saved");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, path = timestamped_path, "failed to create CSV file");
+            }
+        }
+    }
+
+    /// Start CSV recording (called on each Start).
+    pub fn start_csv_recording(&mut self) {
+        if let Some(buffer) = &mut self.csv_buffer {
+            buffer.clear();
+            self.csv_step = 0;
+            self.csv_time = 0.0;
+            tracing::info!("CSV recording started (buffering in memory)");
+        }
+    }
+
+    /// Stop CSV recording and write buffer to file (called on Stop).
+    pub fn stop_csv_recording(&mut self) {
+        if let (Some(buffer), Some(path)) = (&mut self.csv_buffer, &self.csv_path) {
+            if !buffer.is_empty() {
+                Self::flush_csv_to_file(buffer, path);
+                buffer.clear();
+            }
         }
     }
 
@@ -553,6 +650,21 @@ impl Controller {
         let action = self.policy.infer(&observation, net)?;
         self.last_action = action;
 
+        // Record to CSV buffer if enabled
+        if let Some(buffer) = &mut self.csv_buffer {
+            let mut line = format!("{},{:.6}", self.csv_step, self.csv_time);
+            for &v in observation.as_slice() {
+                line.push_str(&format!(",{:.6}", v));
+            }
+            for &v in &action {
+                line.push_str(&format!(",{:.6}", v));
+            }
+            line.push('\n');
+            buffer.push(line);
+            self.csv_step += 1;
+            self.csv_time += dt;
+        }
+
         // Scale and gain follow the active state, recomputed every tick. "Standing tuning"
         // applies whenever the *effective* command is inside the standing threshold and the
         // standing network exists — which is how a kick window and the sitstand rise end up
@@ -669,7 +781,7 @@ mod tests {
             0.05,
         )
         .unwrap();
-        let mut controller = Controller::new(policy, Tuning::default(), SkillTuning::default());
+        let mut controller = Controller::new(policy, Tuning::default(), SkillTuning::default(), None);
         let sensors = duck_control::Sensors::default();
         let command = Command::default();
         let first = controller

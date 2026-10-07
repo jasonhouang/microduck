@@ -1713,7 +1713,12 @@ fn try_controller(
                     limp_fall,
                     "policy loaded"
                 );
-                Ok(Some(Controller::new(policy, tuning, skills)))
+                Ok(Some(Controller::new(
+                    policy,
+                    tuning,
+                    skills,
+                    policy_cfg.record_csv.as_ref().map(|p| p.to_str().unwrap_or("")),
+                )))
             }
             Err(e) => Err(e),
         }
@@ -3023,6 +3028,10 @@ async fn control_loop<T: RobotIo>(
             {
                 controller.reset();
             }
+            // Start CSV recording for this session
+            if let Some(controller) = controller.as_mut() {
+                controller.start_csv_recording();
+            }
         }
         if was_driving && !driving {
             stopped_driving_at = Some(tick_start);
@@ -3031,6 +3040,7 @@ async fn control_loop<T: RobotIo>(
                 // grace period below is for dropped sensor reads, not a user's stop.
                 if let Some(controller) = controller.as_mut() {
                     controller.reset();
+                    controller.stop_csv_recording();
                 }
                 // A deliberate stop returns to the home pose — the prototype's Start-off
                 // ("policy DISABLED - returning to default pose"). Commanded directly, no

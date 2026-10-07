@@ -956,6 +956,9 @@ pub struct PolicyParams {
     pub voltage_adapt: bool,
     /// Reference voltage for `voltage_adapt` — the supply the gains were identified at.
     pub nominal_voltage: f64,
+    /// Optional path for recording model input/output data as CSV. When set, every control
+    /// tick writes the observation (61-dim) and action (14-dim) to this file.
+    pub record_csv: Option<PathBuf>,
 }
 
 /// The literal that disables an optional policy slot, per the prototype's `--x-policy None`.
@@ -1519,6 +1522,7 @@ pub struct ResolvedPolicy {
     pub skills: Vec<SkillDef>,
     pub voltage_adapt: bool,
     pub nominal_voltage: f64,
+    pub record_csv: Option<PathBuf>,
 }
 
 impl ResolvedPolicy {
@@ -1729,6 +1733,7 @@ impl PolicyParams {
             skills,
             voltage_adapt: self.voltage_adapt,
             nominal_voltage: self.nominal_voltage,
+            record_csv: self.record_csv.clone(),
         }
     }
 }
@@ -1816,6 +1821,7 @@ impl Default for PolicyParams {
             skills: Vec::new(),
             voltage_adapt: true,
             nominal_voltage: 7.4,
+            record_csv: None,
         }
     }
 }
