@@ -19,7 +19,7 @@ use crate::model::{
 };
 
 #[cfg(target_os = "linux")]
-use crate::imu_i2c::Lsm6dsv16x;
+use crate::imu_i2c::ImuBus;
 
 /// 0.087 degrees per unit → radians per unit.
 const RAD_PER_UNIT: f64 = 0.087 * PI / 180.0;
@@ -61,7 +61,7 @@ fn raw_vel_to_rad_per_sec(raw: i64) -> f64 {
 pub struct FeetechIo {
     servo: Servo,
     #[cfg(target_os = "linux")]
-    imu: Option<Lsm6dsv16x>,
+    imu: Option<ImuBus>,
 }
 
 impl FeetechIo {
@@ -73,7 +73,7 @@ impl FeetechIo {
             })?;
         #[cfg(target_os = "linux")]
         let imu = match imu_bus {
-            Some(bus) => match Lsm6dsv16x::open(bus) {
+            Some(bus) => match ImuBus::open(std::path::Path::new(bus), 0x6A) {
                 Ok(imu) => Some(imu),
                 Err(e) => {
                     eprintln!("IMU open error: {}", e);
@@ -253,7 +253,7 @@ impl FeetechIo {
     /// Read IMU data only (for diagnostics, independent of servo bus).
     #[cfg(target_os = "linux")]
     pub fn read_imu(&mut self) -> Option<crate::imu::ImuData> {
-        self.imu.as_mut().and_then(|imu| imu.read())
+        self.imu.as_mut().and_then(|imu| imu.read().ok())
     }
 }
 
@@ -298,7 +298,7 @@ impl RobotIo for FeetechIo {
 
         #[cfg(target_os = "linux")]
         if let Some(imu) = self.imu.as_mut() {
-            if let Some(data) = imu.read() {
+            if let Ok(data) = imu.read() {
                 sensors.imu = data;
             }
         }

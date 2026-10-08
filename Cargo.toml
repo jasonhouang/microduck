@@ -109,3 +109,7 @@ url = "2"
 # `strip = true` in particular removes the symbol table, turning a panic backtrace in
 # journald into bare addresses, which is exactly what you need when diagnosing a robot
 # you cannot attach a debugger to. `lto`/`codegen-units` only lengthened builds.
+
+# bisync is yanked on crates.io; vendored and patched locally.
+[patch.crates-io]
+bisync = { path = "vendor/bisync" }

@@ -164,7 +164,7 @@ fn median3_each(history: &[[f64; 3]; 2], now: [f64; 3]) -> [f64; 3] {
 }
 
 /// IEEE 754 binary16 → f64. The LSM6DSV16X ships quaternion components in this format.
-fn half(bits: u16) -> f64 {
+pub(crate) fn half(bits: u16) -> f64 {
     let sign = if bits & 0x8000 != 0 { -1.0 } else { 1.0 };
     let exp = ((bits >> 10) & 0x1F) as i32;
     let frac = (bits & 0x3FF) as f64;

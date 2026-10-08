@@ -196,6 +196,7 @@ impl Observation {
 
         fill(gyro, imu.gyro);
         fill(gravity, imu.gravity);
+
         let angles = policy_joints(joint_positions);
         let home = policy_joints(home_pose);
         // Negate positions and velocities because servo installation direction is opposite

@@ -4,6 +4,10 @@
 is the short list of things that are easy to get backwards, and where the answer lives when they
 are not here.
 
+## Robot SSH access
+
+- **Host**: `magic@192.168.8.17`
+
 ## Docs own mechanisms; one page each
 
 `docs/README.md` assigns every mechanism to one design doc. When a fact belongs to a page listed
