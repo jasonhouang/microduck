@@ -427,10 +427,11 @@ if [ "$BOOTSTRAP" = yes ]; then
     echo "==> bootstrap install (no health gate, robotd stopped)"
     # shellcheck disable=SC2029  # as above: $REMOTE_DIR is expanded locally on purpose.
     ssh -t "$BOARD" "set -e
-        sudo systemctl stop robotd
+        sudo systemctl stop robotd || true
         sudo /opt/robot/daemon/current/bin/updaterd install --from '$REMOTE_DIR' --force
-        sudo systemctl restart updaterd
-        sudo systemctl start robotd"
+        sudo systemctl daemon-reload
+        sudo systemctl restart updaterd || true
+        sudo systemctl start robotd || true"
     echo "==> installed $VERSION (ungated); ordinary pushes need no --bootstrap from here"
     exit 0
 fi

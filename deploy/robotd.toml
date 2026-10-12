@@ -191,6 +191,15 @@ mode = "walk"
 # voltage_adapt = true
 # nominal_voltage = 7.4
 
+# Record policy input/output and joint tracking to CSV for analysis. Path is a template;
+# each Start/Stop cycle creates a timestamped file: `<path>_<timestamp>.csv`. Contains:
+# observation (61D), action (14D), measured positions (14D), commanded targets (14D),
+# and tracking error (14D). Off by default — enable for debugging or data collection.
+# record_csv = "/var/lib/robot/csv/policy_data"
+# robot's response steady as the pack sags. On by default.
+# voltage_adapt = true
+# nominal_voltage = 7.4
+
 [safety]
 # The fall verdict: is the robot down? On projected gravity in the trunk frame — upright
 # reads about -1.0 on z, a robot on its side reads near 0. Debounced, because the impulse

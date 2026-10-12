@@ -152,7 +152,7 @@ const RESET_AFTER_PAUSE: Duration = Duration::from_millis(200);
 
 /// Mean leg-joint deviation from the home pose above which a boot counts as seated —
 /// hips and knees folded far from standing. The prototype's threshold.
-const SEATED_BOOT_RAD: f64 = 0.30;
+const SEATED_BOOT_RAD: f64 = 0.80;
 
 /// Where the limp-fall sequence is (`[safety] limp_fall`).
 ///

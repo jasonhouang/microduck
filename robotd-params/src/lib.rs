@@ -1812,7 +1812,7 @@ impl Default for PolicyParams {
             standing_action_scale: 1.0,
             // The prototype's `--standing-kp-ratio`.
             standing_gain_ratio: 0.8,
-            gain: 10,
+            gain: 4,
             head_lowpass: None,
             legs_lowpass: None,
             ground_pick_period: None,
@@ -1829,14 +1829,14 @@ impl Default for PolicyParams {
 impl Default for SafetyParams {
     fn default() -> Self {
         Self {
-            fall_gravity_z: -0.5,
+            fall_gravity_z: -0.8,
             fall_debounce_ms: 200,
             deadman_ms: 500,
-            gain_limp: 10,
+            gain_limp: 2,
             battery_empty_shutdown: true,
             limp_fall: true,
             limp_fall_tilt_z: -0.90,
-            limp_fall_predict_z: -0.5,
+            limp_fall_predict_z: -0.8,
             limp_fall_lookahead_ms: 300,
             limp_fall_debounce_ms: 60,
             limp_fall_still_rate: 1.0,

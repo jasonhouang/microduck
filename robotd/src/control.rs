@@ -306,6 +306,18 @@ impl Controller {
                 for i in 0..ACTION_LEN {
                     header.push_str(&format!(",action_{}", i));
                 }
+                // Measured positions (joint names)
+                for i in 0..duck_control::NUM_JOINTS {
+                    header.push_str(&format!(",measured_{}", i));
+                }
+                // Commanded targets (joint names)
+                for i in 0..duck_control::NUM_JOINTS {
+                    header.push_str(&format!(",commanded_{}", i));
+                }
+                // Error = measured - commanded (joint names)
+                for i in 0..duck_control::NUM_JOINTS {
+                    header.push_str(&format!(",error_{}", i));
+                }
                 header.push('\n');
                 if let Err(e) = file.write_all(header.as_bytes()) {
                     tracing::warn!(error = %e, path = timestamped_path, "failed to write CSV header");
@@ -650,21 +662,6 @@ impl Controller {
         let action = self.policy.infer(&observation, net)?;
         self.last_action = action;
 
-        // Record to CSV buffer if enabled
-        if let Some(buffer) = &mut self.csv_buffer {
-            let mut line = format!("{},{:.6}", self.csv_step, self.csv_time);
-            for &v in observation.as_slice() {
-                line.push_str(&format!(",{:.6}", v));
-            }
-            for &v in &action {
-                line.push_str(&format!(",{:.6}", v));
-            }
-            line.push('\n');
-            buffer.push(line);
-            self.csv_step += 1;
-            self.csv_time += dt;
-        }
-
         // Scale and gain follow the active state, recomputed every tick. "Standing tuning"
         // applies whenever the *effective* command is inside the standing threshold and the
         // standing network exists — which is how a kick window and the sitstand rise end up
@@ -738,6 +735,36 @@ impl Controller {
             }
         }
         self.previous = Some(targets);
+
+        // Record to CSV buffer if enabled (after targets computation)
+        if let Some(buffer) = &mut self.csv_buffer {
+            let mut line = format!("{},{:.6}", self.csv_step, self.csv_time);
+            // Observation (61 values)
+            for &v in observation.as_slice() {
+                line.push_str(&format!(",{:.6}", v));
+            }
+            // Action (14 values)
+            for &v in &action {
+                line.push_str(&format!(",{:.6}", v));
+            }
+            // Measured positions (14 values)
+            for &v in &sensors.positions {
+                line.push_str(&format!(",{:.6}", v));
+            }
+            // Commanded targets (14 values)
+            for &v in &targets {
+                line.push_str(&format!(",{:.6}", v));
+            }
+            // Error = measured - commanded (14 values)
+            for i in 0..NUM_JOINTS {
+                let error = sensors.positions[i] - targets[i];
+                line.push_str(&format!(",{:.6}", error));
+            }
+            line.push('\n');
+            buffer.push(line);
+            self.csv_step += 1;
+            self.csv_time += dt;
+        }
 
         // Advance the windows, after the tick that used them — the prototype advances its
         // phase after the motor write.
