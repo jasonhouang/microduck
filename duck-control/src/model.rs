@@ -93,13 +93,16 @@ pub const MOUTH_OPEN: f64 = 30.0 * std::f64::consts::PI / 180.0;
 
 /// Joint angle for a mouth opening fraction. 0 is closed, 1 is fully open; anything outside
 /// is clamped rather than fed to a servo as an out-of-travel target.
+///
+/// The output is negated because the mouth servo's installation direction is opposite
+/// to the logical convention (same as all other joints — see `scatter_action`).
 pub fn mouth_target(open: f64) -> f64 {
     let open = if open.is_finite() {
         open.clamp(0.0, 1.0)
     } else {
         0.0
     };
-    MOUTH_CLOSED + open * (MOUTH_OPEN - MOUTH_CLOSED)
+    -(MOUTH_CLOSED + open * (MOUTH_OPEN - MOUTH_CLOSED))
 }
 
 /// Feetech HD1910 baud rate: 1 Mbps (index 0).
@@ -267,12 +270,14 @@ mod tests {
         assert_eq!(battery_percent(-1.0), 0.0);
     }
 
-    /// The mouth range is the prototype's: −5° closed, +30° open. A fraction outside 0..1
+    /// The mouth range is the prototype's: −5° closed, +30° open in simulation convention.
+    /// The physical servo is installed in the opposite direction (same as all other joints),
+    /// so the output is negated: +5° closes, -30° opens. A fraction outside 0..1
     /// (or a NaN from a broken client) must clamp rather than command a servo past travel.
     #[test]
     fn mouth_target_spans_the_prototype_range() {
-        assert!((mouth_target(0.0) - (-5.0f64.to_radians())).abs() < 1e-12);
-        assert!((mouth_target(1.0) - 30.0f64.to_radians()).abs() < 1e-12);
+        assert!((mouth_target(0.0) - (5.0f64.to_radians())).abs() < 1e-12);
+        assert!((mouth_target(1.0) - (-30.0f64.to_radians())).abs() < 1e-12);
         assert_eq!(mouth_target(-3.0), mouth_target(0.0));
         assert_eq!(mouth_target(7.0), mouth_target(1.0));
         assert_eq!(mouth_target(f64::NAN), mouth_target(0.0));
