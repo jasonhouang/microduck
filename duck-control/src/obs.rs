@@ -254,7 +254,7 @@ impl Observation {
     /// mouth left out. For seeding a policy's previous action from a pose it did not command.
     pub fn gather_action(values: &[f64; NUM_JOINTS]) -> [f32; ACTION_LEN] {
         const { assert!(ACTION_LEN == OBS_JOINTS) };
-        policy_joints(values).map(|v| v as f32)
+        policy_joints(values).map(|v| -v as f32)
     }
 }
 
