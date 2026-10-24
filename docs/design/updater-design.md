@@ -395,7 +395,7 @@ The API version bumps when the interface changes — e.g. a model starts consumi
 An unreachable `robotd` makes this *unknown* rather than incompatible, which is a
 reason to wait for a model but not for the daemon — see §5.4's `Compatibility` note.
 
-### 5.6 Hardware: single target
+### 5.6 Hardware: one build, declared boards
 
 **Current target: Radxa Zero 3** (RK3566, Cortex-A55 → `aarch64`) running **Armbian
 26.2.x** with the **Debian 13 (Trixie)** userland, Rockchip BSP kernel 6.1.115.
@@ -425,22 +425,39 @@ What the container cannot cover, and hardware must: a real `systemctl restart`
 against the real filesystem, and whether the health-gate timeouts suit a robot that
 takes tens of seconds to stand up.
 
-**v1 targets one well-specified hardware configuration.** No board / variant /
-IMU / camera matrix, no per-device hardware profile, no artifact selection logic.
-The prototype's hardware variance is an artifact of exploration, not a
-requirement to carry forward.
+**Two boards, one build.** The Zero 3W and the beta are both RK3566, so one aarch64 release
+runs on either. No variant / IMU / camera matrix, no per-device hardware profile, no artifact
+selection logic: what differs between the boards is the daemon's business, keyed on the board
+the robot declares, not the updater's.
 
-What we keep is deliberately minimal:
-- `min_hw_rev` in the manifest (§5.3) as a single forward-compatibility guard, so
-  a future board revision can refuse an incompatible artifact. One integer, no
-  matrix.
+What the updater keeps is deliberately minimal:
+- **`min_hw_rev`** in the manifest (§5.3): one integer, refused when it is above the robot's.
+- **The robot's revision is its declared board**: `[board] version` in `robotd.toml`
+  (`robotd_params::board::Board::hw_rev`: zero3 is 1, beta is 2), read before every check.
+  `hw_rev` in `updater.toml` applies only when no board is declared — every robot installed
+  before the board was a setting carries `hw_rev = 1`, and a board provisioned against a
+  release that still shipped it does too, so it cannot be allowed to outrank the board.
 - A **stable device ID** for the update log (§8.3) and any future phone-home. The
-  SoC serial (`/proc/device-tree/serial-number`) works and survives reflashes —
-  no provisioning step needed to obtain it.
+  SoC serial works and survives reflashes — no provisioning step needed to obtain
+  it. Where it is read differs per board ([`app-path-design.md`](app-path-design.md) §8.2).
 
-If a second hardware target ever appears, the manifest gains constraints and the
-engine gains a match step. Not before — this is exactly the speculative
-complexity to avoid.
+#### Retiring a board
+
+A board is retired by giving it a last release, in `Board::last_release`. That one change
+does both halves:
+
+- **The warning.** From the release that sets it, `robotctl health` on that board says updates
+  end at that version. Set it a few releases ahead, so the warning is on robots for a while.
+- **The cut-off.** `xtask package` derives `min_hw_rev` from the table
+  (`board::min_hw_rev`): the lowest revision among the boards the release being packaged still
+  supports. The first release after a board's last is packaged above that board's revision, and
+  the updater already on the board refuses it — `requires hardware revision 2 or newer`. That
+  check has been in every updater since the first, so retiring a board needs nothing from the
+  robots being retired.
+
+`min_hw_rev` is one number, so boards retire oldest first; a test holds the table to that.
+A prerelease sorts below its release, so a dev build of a board's last release still installs
+on it.
 
 ### 5.7 Robot-specific state must survive updates
 
@@ -475,6 +492,18 @@ done only when genuinely needed, never unconditionally on every update.
   - **GitHub API** query for the newest tag matching a channel prefix
     (`daemon-v*`) — works with a single shared repo. Preferred if we keep both
     channels in one repo.
+
+  **Decided: the API, by tags.** `updaterd` reads `git/matching-refs/tags/<prefix>` — the
+  channel's tags only, filtered by GitHub — and takes the highest semver whose release exists,
+  is not a draft, and is not flagged prerelease (staging allows the flag). A tag with no release,
+  which is every release while it builds, falls through to the one below; five in a row is
+  reported. It does **not** list releases: that listing carries every dev build with all of its
+  assets, ~35 KB each, so its size follows the repository's activity rather than the channel's.
+  At 67 releases its first page passed the 1 MiB metadata cap and every robot stopped updating
+  (#421). Robots on 0.17.4 and older still read it, 100 per page, and 0.17.5 reads it 20 per
+  page; either breaks again when a page outgrows the cap, and only deleting releases unblocks
+  them. A dev ref never used either list: `--ref <branch>` asks
+  for `releases/tags/daemon-dev-<branch>` directly.
 - CI side: `cargo-dist` can build and publish signed artifacts to GitHub
   Releases; we host manifests as additional assets.
 
@@ -1079,7 +1108,6 @@ parses it, so it cannot drift from the code. Abridged here:
 ```toml
 # /etc/robot/updater.toml
 trusted_keys_dir = "/etc/robot/trusted_keys"   # a *set* of keys (§5.4)
-hw_rev           = 1
 state_dir        = "/var/lib/robot/updater"    # must be outside every install_dir
 
 [component.daemon]

@@ -768,11 +768,13 @@ impl RobotState {
                 bus: proto::BusHealth {
                     consecutive_errors: self.consecutive_errors.load(Ordering::Relaxed),
                     startup_failures: self.startup_bus_failures.load(Ordering::Relaxed),
+                    missing: Vec::new(),
                 },
                 imu: Some(proto::ImuHealth {
                     ready: self.imu_ready.load(Ordering::Relaxed),
                     stale_blocks: self.imu_stale_blocks.load(Ordering::Relaxed),
                     consecutive_stale_blocks: self.imu_stale_run.load(Ordering::Relaxed),
+                    missing: false,
                 }),
             };
 
@@ -3349,6 +3351,7 @@ async fn control_loop<T: RobotIo>(
                     limp: matches!(limp_fall, LimpFall::Limp { .. }),
                     gravity: sensors.imu.gravity,
                     gain: safety.gain(),
+                    picked_up: false,
                 },
                 control_loop: proto::LoopState {
                     hz: f64::from_bits(state.achieved_hz.load(Ordering::Relaxed)),

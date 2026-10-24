@@ -31,12 +31,15 @@
 //! cargo run -p duckctl -- wifi scan
 //! cargo run -p duckctl -- wifi connect "Pollen" --psk secret
 //! cargo run -p duckctl -- name "Ducky"
+//! cargo run -p duckctl -- --name duck-d041 quack
 //! cargo run -p duckctl -- call robot.health
 //! cargo run -p duckctl -- logs robotd -n 100
 //! ```
 //!
 //! `DUCK_ROBOT` and `DUCK_PIN` in the environment are the defaults for `--name` and `--pin`, for
 //! the machine that talks to the same robot every day. See [`Target`].
+
+mod udp_pad;
 
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
@@ -493,7 +496,23 @@ fn deliver(command: &Command, address: &str) -> Result<(), Box<dyn std::error::E
                 .into()
             })
         }
-        // `run` only calls this for the four above; every other command's answer is its JSON.
+        Command::UdpPad {
+            hz,
+            invert_y,
+            pad,
+            mute,
+            voice,
+            robot_sound_on,
+            ..
+        } => udp_pad::run(
+            address,
+            *hz,
+            *invert_y,
+            udp_pad::pick(*pad),
+            udp_pad::sound(*mute, *voice),
+            *robot_sound_on,
+        ),
+        // `run` only calls this for the five above; every other command's answer is its JSON.
         _ => Err("this command does not resolve an address".into()),
     }
 }
@@ -1071,6 +1090,11 @@ enum Command {
     Update(Update),
     /// Name, serial and uptime.
     Info,
+    /// Play this robot's quack — the loudest way to tell ducks apart.
+    ///
+    /// `robotctl quack` on the robot. Every voice is generated from the SoC serial, so the duck
+    /// that answers, in a voice that is only its own, is the one `--name` reached.
+    Quack,
     /// Is the control loop healthy?
     Health,
     /// Wifi.
@@ -1124,6 +1148,39 @@ enum Command {
     /// Which pad button runs which skill.
     #[command(subcommand)]
     Pad(Pad),
+    /// Drive a duck running `netpadd` from the pad plugged into this machine, over UDP on the LAN.
+    ///
+    /// Give the duck's address, or leave it out and the address is found the way `ip` finds it —
+    /// so `duckctl --name ducky udp-pad` works, and so does `DUCK_ROBOT`. The duck needs
+    /// `[netpad] enabled = true` — docs/robot/udp-pad.md.
+    UdpPad {
+        /// The duck's address, optionally with `:port` (default 4210). Without it, the address
+        /// comes from `--name`, `DUCK_ROBOT` or the first robot found, over Bluetooth.
+        host: Option<String>,
+        /// Most datagrams a second.
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u32).range(10..=100))]
+        hz: u32,
+        /// Flip both sticks' Y before sending, for a pad that drives backwards. On top of the
+        /// flip macOS always gets, which makes it send what `padd` reads on the robot.
+        #[arg(long)]
+        invert_y: bool,
+        /// Send the Nth pad on this machine, from 1. Without it, the pad sent is the first one a
+        /// button is pressed on — one `udp-pad` per duck, each claiming its own pad.
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        pad: Option<u64>,
+        /// Keep this machine quiet. Without it, RT's quack and LT's wheee play from its default
+        /// audio output as well as from the duck.
+        #[arg(long)]
+        mute: bool,
+        /// Which voice this machine quacks in. Without it, a voice of its own, drawn on the first
+        /// run and kept in `duckctl/voice-seed` under the user's configuration directory.
+        #[arg(long, value_name = "SEED", conflicts_with = "mute")]
+        voice: Option<u32>,
+        /// Have the duck quack and wheee too. Without it the duck only opens its mouth, and the
+        /// sound is this machine's.
+        #[arg(long)]
+        robot_sound_on: bool,
+    },
     /// Reboot it.
     Reboot,
     /// Send any method, for whatever is not wrapped above.
@@ -1141,7 +1198,7 @@ enum Command {
 /// that is the daemon with it.
 #[derive(Subcommand)]
 enum Pad {
-    /// What each of the five one-shot buttons runs.
+    /// What each of the six one-shot buttons runs.
     ///
     /// `overridden` marks what somebody changed; `error` marks a button bound to a skill this
     /// robot does not have, which is a button that will do nothing when pressed.
@@ -1152,7 +1209,7 @@ enum Pad {
     /// checked against this robot's skills first, so a typo is refused with the real list rather
     /// than becoming a dead button.
     Bind {
-        /// `a`, `x`, `lb`, `rb` or `dpad_down` — the bumpers, not the analog triggers.
+        /// `a`, `b`, `x`, `y`, `lb` or `rb` — the bumpers, not the analog triggers.
         button: String,
         /// A skill this robot has, or `""` to leave the button doing nothing.
         skill: String,
@@ -1420,6 +1477,33 @@ async fn main() -> std::process::ExitCode {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+    // Before anything Bluetooth: given an address, this command talks UDP to it and nothing else.
+    if let Command::UdpPad {
+        host: Some(host),
+        hz,
+        invert_y,
+        pad,
+        mute,
+        voice,
+        robot_sound_on,
+    } = &cli.command
+    {
+        // By hand, because clap's `conflicts_with` does not reach a global flag from a subcommand.
+        if let Some(name) = &cli.name {
+            return Err(format!(
+                "`--name {name}` and the address {host:?} both say which robot — give one or the other"
+            )
+            .into());
+        }
+        return udp_pad::run(
+            host,
+            *hz,
+            *invert_y,
+            udp_pad::pick(*pad),
+            udp_pad::sound(*mute, *voice),
+            *robot_sound_on,
+        );
+    }
     // Read once, here, so everything below asks `target` rather than the environment: which robot
     // was chosen and who chose it is one decision, and a second reader of `DUCK_ROBOT` could
     // disagree with the first.
@@ -1437,14 +1521,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // what makes it the safe command to reach for when a robot cannot be reached, and it is also why
     // it can only report what an advertisement carries.
     let list_only = matches!(cli.command, Command::Scan);
-    // `ip`, `open`, `ssh` and `scp` want one field out of an advertisement, so they read it the way
-    // `scan` does — and unlike `scan` they connect after all when no advertisement carried one.
+    // `ip`, `open`, `ssh`, `scp` and an address-less `udp-pad` want one field out of an
+    // advertisement, so they read it the way `scan` does — and unlike `scan` they connect after all
+    // when no advertisement carried one.
     // Cheap read first, call second: without the fallback these commands would fail on exactly the
     // laptops that use them most, because a robot bonded to this Mac often stops advertising the
     // service to it.
     let resolving = matches!(
         cli.command,
-        Command::Ip | Command::Open { .. } | Command::Ssh { .. } | Command::Scp { .. }
+        Command::Ip
+            | Command::Open { .. }
+            | Command::Ssh { .. }
+            | Command::Scp { .. }
+            | Command::UdpPad { host: None, .. }
     );
 
     let manager = Manager::new().await?;
@@ -2203,9 +2292,11 @@ fn request_line(command: &Command) -> Result<(String, Duration), Box<dyn std::er
         // The fallback, reached only when no advertisement carried an address. `net.status` is what
         // the advertisement is made of — `btd` re-reads it every five seconds — so this asks the
         // same question over a connection that costs a bond and a PIN.
-        Command::Ip | Command::Open { .. } | Command::Ssh { .. } | Command::Scp { .. } => {
-            ("net.status", serde_json::json!({}), REPLY_TIMEOUT)
-        }
+        Command::Ip
+        | Command::Open { .. }
+        | Command::Ssh { .. }
+        | Command::Scp { .. }
+        | Command::UdpPad { .. } => ("net.status", serde_json::json!({}), REPLY_TIMEOUT),
         Command::Version => (
             "hello",
             serde_json::json!({ "api_version": duck_ipc_proto::API_VERSION }),
@@ -2213,6 +2304,14 @@ fn request_line(command: &Command) -> Result<(String, Duration), Box<dyn std::er
         ),
         Command::Update(update) => return update_request_line(update),
         Command::Info => ("system.info", serde_json::json!({}), REPLY_TIMEOUT),
+        Command::Quack => (
+            proto::method::ROBOT_SOUND,
+            serde_json::to_value(proto::SoundParams {
+                tag: proto::SoundTag::Chirp,
+                hold: None,
+            })?,
+            REPLY_TIMEOUT,
+        ),
         // A journal read is a `journalctl` spawn on the robot plus a reply several times larger
         // than any other, chunked at 20 bytes a notification — seconds rather than milliseconds,
         // so it gets the slow budget for the same reason `wifi scan` does.

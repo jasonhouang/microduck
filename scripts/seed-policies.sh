@@ -51,7 +51,31 @@ LOCAL_POLICY_DIR="${LOCAL_POLICY_DIR:-$REPO_ROOT/policies}"
 # board past it — `robotctl policy update`, which needs no daemon release — is left where it is.
 # Bumping this ships inside a release, so bump it when the daemon's defaults need the new set
 # (a slot defaulting to a file only the new set carries), and tag the set first.
+<<<<<<< HEAD
 POLICY_VERSION="${POLICY_VERSION:-v6-hd1910}"
+=======
+POLICY_REPO="${POLICY_REPO:-pollen-robotics/microduck-policies}"
+POLICY_VERSION="${POLICY_VERSION:-v8}"
+POLICY_BASE_URL="${POLICY_BASE_URL:-https://huggingface.co/${POLICY_REPO}/resolve/${POLICY_VERSION}}"
+
+# The set says what is in it. `manifest.json` lists every policy, and that list is what gets
+# downloaded — so adding a tenth policy to the set is a tag on the Hub rather than an edit here
+# and a daemon release to carry it.
+#
+# The fallback below is what robotd's own defaults name (both modes), for a revision tagged
+# before the manifest did. It goes when every tagged set carries one.
+#
+# The grep is over a file we generate, so its shape is ours: one `"file": "name.onnx"` per policy.
+# A JSON parser is not available here — this runs from a release on a board with curl and a
+# POSIX shell — and an xtask test asserts the pattern matches what the manifest actually says.
+FALLBACK_FILES="velstand.onnx alpha_sitstand.onnx alpha_ground_pick.onnx ball_kick_left.onnx ball_kick_right.onnx roller.onnx roller_crouch.onnx roulade.onnx"
+
+# Per-file, because `hooks/postinstall` runs inside an update under a 120-second hook timeout and
+# a hook that times out fails the update and rolls it back. Ten files at eight seconds is 80,
+# which leaves the rest of the hook room; a link that cannot move 800 KB in eight seconds is one
+# the fallback below is for, and the next update tries again.
+CURL_OPTS="--fail --location --silent --show-error --connect-timeout 5 --max-time 8"
+>>>>>>> origin/main
 
 # Where a set came from, written beside it.
 #
