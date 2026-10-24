@@ -30,32 +30,24 @@ const _: () = assert!(JOINT_NAMES.len() == NUM_JOINTS);
 /// than an off-by-one someone has to rediscover.
 pub const MOUTH_INDEX: usize = 9;
 
-/// Home pose. Calibrated from the robot's actual standing position.
-///
-/// Note: The signs are inverted compared to the simulation's STAND keyframe.
-/// This is because the servo installation direction is opposite to the simulation's
-/// joint convention. The policy observes positions relative to home, so this works
-/// as long as the observation vector is consistent.
-///
-/// Must match `HOME_FRAME` in the training env — a policy is trained against these angles
-/// and observes joint positions *relative* to them, so a discrepancy here is a constant
-/// offset on 14 observation slots.
+/// Home pose in Dynamixel convention (simulation sign).
+/// The hardware sign flip happens in raw_to_radians/radians_to_raw.
 pub const DEFAULT_POSITION: [f64; NUM_JOINTS] = [
     0.0,     // left_hip_yaw (ID 20)
-    0.0873,  // left_hip_roll (ID 21)
-    0.4579,  // left_hip_pitch (ID 22)
-    0.0049,  // left_knee (ID 23)
-    -0.4530, // left_ankle (ID 24)
-    -0.3491, // neck_pitch (ID 30)
-    -0.3491, // head_pitch (ID 31)
+    -0.0873, // left_hip_roll (ID 21)
+    -0.4579, // left_hip_pitch (ID 22)
+    -0.0049, // left_knee (ID 23)
+    0.4530,  // left_ankle (ID 24)
+    0.3491,  // neck_pitch (ID 30)
+    0.3491,  // head_pitch (ID 31)
     0.0,     // head_yaw (ID 32)
     0.0,     // head_roll (ID 33)
     0.0,     // mouth (ID 34)
     0.0,     // right_hip_yaw (ID 10)
-    -0.0873, // right_hip_roll (ID 11)
-    -0.4579, // right_hip_pitch (ID 12)
-    -0.0049, // right_knee (ID 13)
-    0.4530,  // right_ankle (ID 14)
+    0.0873,  // right_hip_roll (ID 11)
+    0.4579,  // right_hip_pitch (ID 12)
+    0.0049,  // right_knee (ID 13)
+    -0.4530, // right_ankle (ID 14)
 ];
 
 /// Rest pose: where a seated robot settles with its torque off. Recorded on graphite-bang
@@ -93,16 +85,13 @@ pub const MOUTH_OPEN: f64 = 30.0 * std::f64::consts::PI / 180.0;
 
 /// Joint angle for a mouth opening fraction. 0 is closed, 1 is fully open; anything outside
 /// is clamped rather than fed to a servo as an out-of-travel target.
-///
-/// The output is negated because the mouth servo's installation direction is opposite
-/// to the logical convention (same as all other joints — see `scatter_action`).
 pub fn mouth_target(open: f64) -> f64 {
     let open = if open.is_finite() {
         open.clamp(0.0, 1.0)
     } else {
         0.0
     };
-    -(MOUTH_CLOSED + open * (MOUTH_OPEN - MOUTH_CLOSED))
+    MOUTH_CLOSED + open * (MOUTH_OPEN - MOUTH_CLOSED)
 }
 
 /// Feetech HD1910 baud rate: 1 Mbps (index 0).
@@ -270,14 +259,12 @@ mod tests {
         assert_eq!(battery_percent(-1.0), 0.0);
     }
 
-    /// The mouth range is the prototype's: −5° closed, +30° open in simulation convention.
-    /// The physical servo is installed in the opposite direction (same as all other joints),
-    /// so the output is negated: +5° closes, -30° opens. A fraction outside 0..1
+    /// The mouth range is the prototype's: −5° closed, +30° open. A fraction outside 0..1
     /// (or a NaN from a broken client) must clamp rather than command a servo past travel.
     #[test]
     fn mouth_target_spans_the_prototype_range() {
-        assert!((mouth_target(0.0) - (5.0f64.to_radians())).abs() < 1e-12);
-        assert!((mouth_target(1.0) - (-30.0f64.to_radians())).abs() < 1e-12);
+        assert!((mouth_target(0.0) - (-5.0f64.to_radians())).abs() < 1e-12);
+        assert!((mouth_target(1.0) - 30.0f64.to_radians()).abs() < 1e-12);
         assert_eq!(mouth_target(-3.0), mouth_target(0.0));
         assert_eq!(mouth_target(7.0), mouth_target(1.0));
         assert_eq!(mouth_target(f64::NAN), mouth_target(0.0));

@@ -47,11 +47,14 @@ const EEPROM_SETTLE: Duration = Duration::from_millis(20);
 const POS_OFFSET: i64 = 2048;
 
 fn raw_to_radians(raw: i64) -> f64 {
-    (raw - POS_OFFSET) as f64 * RAD_PER_UNIT
+    // Negate: Feetech servos are installed opposite to the simulation's Dynamixel convention.
+    // This is the single place where the hardware sign flip happens.
+    -((raw - POS_OFFSET) as f64 * RAD_PER_UNIT)
 }
 
 fn radians_to_raw(rad: f64) -> i64 {
-    (rad / RAD_PER_UNIT).round() as i64 + POS_OFFSET
+    // Negate: see raw_to_radians.
+    (-rad / RAD_PER_UNIT).round() as i64 + POS_OFFSET
 }
 
 fn raw_vel_to_rad_per_sec(raw: i64) -> f64 {

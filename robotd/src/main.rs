@@ -20,11 +20,17 @@
 
 mod chorale;
 mod control;
+mod head_imu;
+mod idle_head;
 mod intents;
+mod leds;
 mod params;
+mod pickup;
+mod posture;
 mod soc;
 mod sound;
 mod theremin;
+mod vetbook;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -128,10 +134,34 @@ const SHUTDOWN_SIT: Duration = Duration::from_secs(3);
 const REST_RAMP: Duration = Duration::from_secs(1);
 const REST_HOLD: Duration = Duration::from_secs(1);
 
+/// The seated pose: knees bent, hips pitched, ankles level. The sitstand network's trained target
+/// (matching `SITTING_TARGET_OVERRIDES`): knees ±1.35, hip pitch the home pose's tilted 0.05 forward, ankles
+/// and hip roll at 0. Stability-verified there — held, it settles at 3–5° of tilt, where the
+/// keyframe before it tipped over backwards within a second. The hip yaw and the head, which the
+/// keyframe leaves alone, stay at the home pose. Keep in step with that file: the rise is trained
+/// from this seat.
+const SEAT_POSITION: [f64; NUM_JOINTS] = [
+    0.0,     // left_hip_yaw
+    0.0,     // left_hip_roll
+    -0.4079, // left_hip_pitch
+    1.35,    // left_knee
+    0.0,     // left_ankle
+    DEFAULT_POSITION[5],
+    DEFAULT_POSITION[6],
+    DEFAULT_POSITION[7],
+    DEFAULT_POSITION[8],
+    DEFAULT_POSITION[9],
+    0.0,    // right_hip_yaw
+    0.0,    // right_hip_roll
+    0.4079, // right_hip_pitch
+    -1.35,  // right_knee
+    0.0,    // right_ankle
+];
+
 /// How many consecutive failed bus reads the policy may drive through on the last good
 /// sample before it stops.
 ///
-/// **One dropped Dynamixel transaction is ordinary** — `robotd` says so itself when it logs
+/// **One dropped Dynamixel transaction is ordinary** — `robotd` says so itself when it logs,
 /// one — and it must therefore be *invisible*. It was not: a failed read used to stop the
 /// policy for that tick, which commanded the hold pose and reset the controller, so every
 /// ordinary dropped read produced a visible twitch. Measured on a bench robot at ~8 drops a
@@ -547,6 +577,11 @@ struct RobotState {
     /// reading the startup pose. Non-zero means the loop is still waiting for a robot to
     /// answer and has never commanded anything.
     startup_bus_failures: AtomicU32,
+    /// While waiting: the servo IDs the last ping round found silent. Empty once the bus is up,
+    /// and when the port would not open at all — then nothing was asked.
+    startup_missing: ArcSwap<Vec<u8>>,
+    /// While waiting: every servo answered and the IMU board did not. False once the bus is up.
+    startup_imu_missing: AtomicBool,
     /// Motor-bus voltage, EMA-smoothed, as `f64::to_bits`. Zero means *not read yet* — a
     /// distinction that has to survive to the wire, since zero volts and unknown volts look
     /// nothing alike to whoever is deciding whether to charge the robot.
@@ -575,6 +610,13 @@ struct RobotState {
     imu_stale_run: AtomicU64,
     imu_ready: AtomicBool,
     shutdown: AtomicBool,
+    /// What `robot.flashlight` last asked for, as [`leds::Flashlight`] stores it.
+    flashlight: AtomicU8,
+    /// Whether this board has a flashlight, so `robot.flashlight` refuses on one that does not
+    /// rather than accepting into the dark. Read once: an LED does not appear on a running board.
+    has_flashlight: bool,
+    /// Wakes the LED task now, rather than at its next second — a flashlight press, the shutdown.
+    leds_changed: tokio::sync::Notify,
     /// Fan-out for `robot.state`. Bounded and lossy by design — see [`STATE_BUFFER`].
     state_tx: tokio::sync::broadcast::Sender<proto::RobotState>,
     /// What `btd` should be advertising, published when it changes.
@@ -584,6 +626,13 @@ struct RobotState {
     /// that has fallen behind on beacons wants the newest one, not a backlog of beats that have
     /// already passed.
     chorale_tx: tokio::sync::broadcast::Sender<proto::ChoraleAdvertise>,
+    /// Fan-out for `head_imu.stream` on a `beta` (see [`head_imu`]). Lossy like the state stream:
+    /// a subscriber that falls behind loses samples, the reader never waits.
+    head_imu_tx: tokio::sync::broadcast::Sender<proto::HeadImuFrame>,
+    /// What a `head_imu.stream` subscriber is told before the frames: the chip, or why none.
+    head_imu: head_imu::HeadImuStatus,
+    /// Which board this robot is (`[board] version`). Decides the body IMU's mount.
+    board: robotd_params::board::Board,
     /// Why the policy is not loaded, if it is not. Set once at startup; the loop keeps
     /// running and holds the pose, so a broken bundle is a rollback rather than a crash.
     policy_error: ArcSwapOption<String>,
@@ -679,6 +728,10 @@ struct RobotState {
     /// [`control::Controller::busy`] already draws.
     sitting: AtomicBool,
 
+    /// The vet book: the robot's lifetime record. The loop hands it what it counted once a second
+    /// and never waits for it — see [`vetbook`].
+    vetbook: vetbook::Book,
+
     period_us: u64,
     min_achieved_hz: f64,
     stall_periods: u32,
@@ -702,6 +755,8 @@ impl RobotState {
             achieved_hz: AtomicU64::new(0),
             consecutive_errors: AtomicU32::new(0),
             startup_bus_failures: AtomicU32::new(0),
+            startup_missing: ArcSwap::from_pointee(Vec::new()),
+            startup_imu_missing: AtomicBool::new(false),
             battery_v: AtomicU64::new(0),
             motor_max_c: AtomicU64::new(0),
             motor_mean_c: AtomicU64::new(0),
@@ -712,8 +767,14 @@ impl RobotState {
             imu_stale_run: AtomicU64::new(0),
             imu_ready: AtomicBool::new(false),
             shutdown: AtomicBool::new(false),
+            flashlight: AtomicU8::new(0),
+            has_flashlight: leds::flashlight_fitted(),
+            leds_changed: tokio::sync::Notify::new(),
             state_tx: tokio::sync::broadcast::Sender::new(STATE_BUFFER),
             chorale_tx: tokio::sync::broadcast::Sender::new(8),
+            head_imu_tx: tokio::sync::broadcast::Sender::new(head_imu::FRAME_BUFFER),
+            head_imu: head_imu::HeadImuStatus::new(),
+            board: params.board.version,
             policy_error: ArcSwapOption::empty(),
             policy_change_error: ArcSwapOption::empty(),
             policies: ArcSwap::from_pointee(PolicyNames::of(&params.policy.resolved())),
@@ -733,6 +794,8 @@ impl RobotState {
             moving: AtomicBool::new(false),
             homed: AtomicBool::new(false),
             sitting: AtomicBool::new(false),
+            // In memory until `main` opens the robot's own; tests keep it that way.
+            vetbook: vetbook::Book::open(None, env!("CARGO_PKG_VERSION")),
             period_us: params.period().as_micros() as u64,
             min_achieved_hz: params.update_gate.min_achieved_hz,
             stall_periods: params.update_gate.stall_periods,
@@ -5307,7 +5370,7 @@ mod tests {
         assert!(!result.accepted);
         let reason = result.reason.unwrap_or_default();
         assert!(
-            reason.contains("triangle") && reason.contains("dpad_down"),
+            reason.contains("triangle") && reason.contains("lb"),
             "{reason}"
         );
     }
@@ -5319,6 +5382,22 @@ mod tests {
     fn an_empty_skill_is_off_and_an_absent_one_is_the_default() {
         let (_dir, state) = state_over("");
 
+        // Default for x is empty in develop
+        let off = bind_pad_request(
+            &proto::PadBindParams {
+                button: "x".to_owned(),
+                skill: Some("roulade".to_owned()),
+            },
+            &state,
+        );
+        assert!(off.accepted, "{off:?}");
+        assert_eq!(
+            params::edit::pad_bindings(&state.config_path).unwrap().x,
+            "roulade",
+            "set to roulade"
+        );
+
+        // Switch off
         let off = bind_pad_request(
             &proto::PadBindParams {
                 button: "x".to_owned(),
@@ -5333,6 +5412,7 @@ mod tests {
             "switched off"
         );
 
+        // Back to default (empty)
         let back = bind_pad_request(
             &proto::PadBindParams {
                 button: "x".to_owned(),
@@ -5343,7 +5423,7 @@ mod tests {
         assert!(back.accepted, "{back:?}");
         assert_eq!(
             params::edit::pad_bindings(&state.config_path).unwrap().x,
-            "roulade",
+            "",
             "back to what the robot ships with"
         );
     }
@@ -5353,6 +5433,17 @@ mod tests {
     #[test]
     fn binding_what_is_already_bound_writes_nothing() {
         let (_dir, state) = state_over("");
+        // First set x to something
+        let set = bind_pad_request(
+            &proto::PadBindParams {
+                button: "x".to_owned(),
+                skill: Some("roulade".to_owned()),
+            },
+            &state,
+        );
+        assert!(set.accepted, "{set:?}");
+        
+        // Now ask for the same thing
         let result = bind_pad_request(
             &proto::PadBindParams {
                 button: "x".to_owned(),
@@ -5457,7 +5548,7 @@ mod tests {
         );
     }
 
-    /// Limp-fall ships OFF (the default gait has no standing network to hand back to), and
+    /// Limp-fall ships ON by default (the default gait has a standing network), and
     /// switched on it must refuse a fallen robot nothing.
     ///
     /// This is the contract that answers "I booted it face-down and pressed Start": enable
@@ -5466,8 +5557,8 @@ mod tests {
     fn limp_fall_ships_off_and_refuses_nothing() {
         let mut params = Params::default();
         assert!(
-            !params.safety.limp_fall,
-            "off by default: velstand loads no standing policy"
+            params.safety.limp_fall,
+            "on by default: alpha has a standing network"
         );
         params.safety.limp_fall = true;
 
