@@ -296,8 +296,8 @@ impl Servo {
         for (i, &id) in ids.iter().enumerate() {
             if values[i] < reg.min || values[i] > reg.max {
                 return Err(ServoError::InvalidParam(format!(
-                    "value {} for id {} out of {}..{}",
-                    values[i], id, reg.min, reg.max
+                    "value {} for id out of {}..{}",
+                    values[i], reg.min, reg.max
                 )));
             }
         }
@@ -317,6 +317,82 @@ impl Servo {
         }
         self.transact(BROADCAST_ID, Instruction::SyncWrite, &params, false)?;
         Ok(())
+    }
+
+    /// SyncRead (0x82): read the same register range from multiple servos in one transaction.
+    /// Returns a vector of (id, data) pairs in the order they responded.
+    pub fn sync_read(&mut self, ids: &[u8], start_addr: u8, read_len: u8) -> Result<Vec<(u8, Vec<u8>)>> {
+        if ids.is_empty() {
+            return Err(ServoError::InvalidParam("sync_read: no ids provided".into()));
+        }
+
+        // Build sync_read packet: start_addr, read_len, id1, id2, ...
+        let mut params = Vec::with_capacity(2 + ids.len());
+        params.push(start_addr);
+        params.push(read_len);
+        for &id in ids {
+            params.push(id);
+        }
+
+        // Send the sync_read command (broadcast, no direct reply)
+        let pkt = protocol::build_packet(BROADCAST_ID, Instruction::SyncRead, &params);
+        if self.verbose {
+            eprintln!("  >> tx sync_read: {:02X?}", pkt);
+        }
+        self.port.write_all(&pkt)?;
+
+        // All servos respond consecutively. Calculate expected total size:
+        // Each response: header(2) + length(1) + id(1) + error(1) + data(read_len) + checksum(1)
+        let response_size = 6 + read_len as usize;
+        let total_size = response_size * ids.len();
+
+        // Read all responses at once
+        let mut buf = vec![0u8; total_size + 32]; // extra space for safety
+        let mut total_read = 0;
+        let mut attempts = 0;
+        let max_attempts = 50; // 50 * 1ms = 50ms max wait
+
+        while total_read < total_size && attempts < max_attempts {
+            let n = self.port.read_with_timeout(&mut buf[total_read..], 1).map_err(|e| match e {
+                ServoError::Io(ref ie) if ie.kind() == std::io::ErrorKind::TimedOut => ServoError::Timeout,
+                _ => e,
+            })?;
+            total_read += n;
+            attempts += 1;
+        }
+
+        if total_read == 0 {
+            return Ok(Vec::new()); // No responses
+        }
+
+        // Parse all responses
+        let mut results = Vec::with_capacity(ids.len());
+        let mut pos = 0;
+
+        while pos + 6 <= total_read {
+            // Find header
+            if buf[pos] != 0xFF || buf[pos + 1] != 0xFF {
+                pos += 1;
+                continue;
+            }
+
+            let id = buf[pos + 2];
+            let length = buf[pos + 3] as usize;
+            let error = buf[pos + 4];
+
+            if pos + 5 + length > total_read {
+                break; // Incomplete packet
+            }
+
+            if error == 0 && length > 1 {
+                let data = buf[pos + 5..pos + 5 + length - 1].to_vec();
+                results.push((id, data));
+            }
+
+            pos += 5 + length;
+        }
+
+        Ok(results)
     }
 
     /// Factory reset (0x06): EPROM returns to defaults.

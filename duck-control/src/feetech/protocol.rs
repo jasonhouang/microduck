@@ -14,6 +14,7 @@ pub enum Instruction {
     RegWrite = 0x04,
     Action = 0x05,
     Reset = 0x06,
+    SyncRead = 0x82,
     SyncWrite = 0x83,
 }
 

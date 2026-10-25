@@ -271,32 +271,37 @@ pub fn replacement_target(missing: &[u8]) -> Option<u8> {
 impl RobotIo for FeetechIo {
     /// Read position, velocity and load for every joint, plus body IMU orientation when fitted.
     ///
-    /// One 6-byte read per servo (addresses 56–61: pos, vel, load are contiguous).
-    /// 15 servos × 1 transaction = 15 transactions per tick, vs 45 if read separately.
+    /// Uses SyncRead (0x82) to read all 15 servos in one transaction (addresses 56–61: pos, vel, load).
+    /// This is much faster than individual reads: 1 transaction vs 15 transactions per tick.
     fn read(&mut self) -> Result<Sensors> {
         let mut sensors = Sensors::default();
 
-        for (i, &id) in JOINT_IDS.iter().enumerate() {
-            let raw = self
-                .servo
-                .read(id, 56, 6)
-                .map_err(|e| IoError::Bus(format!("read feedback on {id}: {e}")))?;
-            if raw.len() < 6 {
-                return Err(IoError::ShortRead {
-                    what: "motor feedback",
-                    expected: 6,
-                    got: raw.len(),
-                });
-            }
-            let u16le = |o: usize| u16::from_le_bytes([raw[o], raw[o + 1]]);
-            let raw_pos = registers::decode_value(u16le(0), Some(15));
-            let raw_vel = registers::decode_value(u16le(2), Some(15));
-            let raw_load = registers::decode_value(u16le(4), Some(10));
+        // Use SyncRead to read position (2 bytes), velocity (2 bytes), load (2 bytes) from all servos
+        let results = self
+            .servo
+            .sync_read(&JOINT_IDS, 56, 6)
+            .map_err(|e| IoError::Bus(format!("sync_read feedback: {e}")))?;
 
-            sensors.positions[i] = raw_to_radians(raw_pos);
-            sensors.velocities[i] = raw_vel_to_rad_per_sec(raw_vel);
-            // Load is duty-cycle %, take magnitude like the old bus did for current.
-            sensors.currents_ma[i] = raw_load.abs() as f64 * 10.0; // 0.1% per unit → ~mA proxy
+        // Parse results - they may not be in order, so match by ID
+        for (id, raw) in results {
+            if let Some(i) = JOINT_IDS.iter().position(|&jid| jid == id) {
+                if raw.len() < 6 {
+                    return Err(IoError::ShortRead {
+                        what: "motor feedback",
+                        expected: 6,
+                        got: raw.len(),
+                    });
+                }
+                let u16le = |o: usize| u16::from_le_bytes([raw[o], raw[o + 1]]);
+                let raw_pos = registers::decode_value(u16le(0), Some(15));
+                let raw_vel = registers::decode_value(u16le(2), Some(15));
+                let raw_load = registers::decode_value(u16le(4), Some(10));
+
+                sensors.positions[i] = raw_to_radians(raw_pos);
+                sensors.velocities[i] = raw_vel_to_rad_per_sec(raw_vel);
+                // Load is duty-cycle %, take magnitude like the old bus did for current.
+                sensors.currents_ma[i] = raw_load.abs() as f64 * 10.0; // 0.1% per unit → ~mA proxy
+            }
         }
 
         #[cfg(target_os = "linux")]
