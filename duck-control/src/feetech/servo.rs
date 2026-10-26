@@ -361,7 +361,7 @@ impl Servo {
 
         // Total timeout for all responses
         let start_time = std::time::Instant::now();
-        let timeout = std::time::Duration::from_millis(200);
+        let timeout = std::time::Duration::from_millis(80);
 
         while start_time.elapsed() < timeout && empty_reads < max_empty_reads {
             let n = self
