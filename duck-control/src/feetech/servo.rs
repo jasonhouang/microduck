@@ -321,9 +321,16 @@ impl Servo {
 
     /// SyncRead (0x82): read the same register range from multiple servos in one transaction.
     /// Returns a vector of (id, data) pairs in the order they responded.
-    pub fn sync_read(&mut self, ids: &[u8], start_addr: u8, read_len: u8) -> Result<Vec<(u8, Vec<u8>)>> {
+    pub fn sync_read(
+        &mut self,
+        ids: &[u8],
+        start_addr: u8,
+        read_len: u8,
+    ) -> Result<Vec<(u8, Vec<u8>)>> {
         if ids.is_empty() {
-            return Err(ServoError::InvalidParam("sync_read: no ids provided".into()));
+            return Err(ServoError::InvalidParam(
+                "sync_read: no ids provided".into(),
+            ));
         }
 
         // Build sync_read packet: start_addr, read_len, id1, id2, ...
@@ -341,55 +348,81 @@ impl Servo {
         }
         self.port.write_all(&pkt)?;
 
-        // All servos respond consecutively. Calculate expected total size:
-        // Each response: header(2) + length(1) + id(1) + error(1) + data(read_len) + checksum(1)
+        // Each response: header(2) + id(1) + length(1) + error(1) + data(read_len) + checksum(1)
+        // FT-SCS length field = error(1) + data(read_len) + checksum(1) = 2 + read_len
+        // Total packet size = 2 + 1 + 1 + length = 4 + length = 6 + read_len
         let response_size = 6 + read_len as usize;
-        let total_size = response_size * ids.len();
 
-        // Read all responses at once
-        let mut buf = vec![0u8; total_size + 32]; // extra space for safety
-        let mut total_read = 0;
-        let mut attempts = 0;
-        let max_attempts = 50; // 50 * 1ms = 50ms max wait
+        // Read all responses with timeout
+        let mut buf = vec![0u8; response_size * ids.len() + 64];
+        let mut buf_len = 0;
+        let mut empty_reads = 0;
+        let max_empty_reads = 10;
 
-        while total_read < total_size && attempts < max_attempts {
-            let n = self.port.read_with_timeout(&mut buf[total_read..], 1).map_err(|e| match e {
-                ServoError::Io(ref ie) if ie.kind() == std::io::ErrorKind::TimedOut => ServoError::Timeout,
-                _ => e,
-            })?;
-            total_read += n;
-            attempts += 1;
-        }
+        // Total timeout for all responses
+        let start_time = std::time::Instant::now();
+        let timeout = std::time::Duration::from_millis(200);
 
-        if total_read == 0 {
-            return Ok(Vec::new()); // No responses
+        while start_time.elapsed() < timeout && empty_reads < max_empty_reads {
+            let n = self
+                .port
+                .read_with_timeout(&mut buf[buf_len..], self.read_timeout_ms)?;
+            if n == 0 {
+                empty_reads += 1;
+            } else {
+                empty_reads = 0;
+                buf_len += n;
+            }
+
+            // Check if we have all responses
+            let mut pos = 0;
+            let mut count = 0;
+            while pos + 6 <= buf_len {
+                if buf[pos] != 0xFF || buf[pos + 1] != 0xFF {
+                    pos += 1;
+                    continue;
+                }
+
+                let length = buf[pos + 3] as usize;
+                if pos + length + 4 > buf_len {
+                    break;
+                }
+
+                count += 1;
+                pos += length + 4;
+            }
+
+            if count >= ids.len() {
+                break;
+            }
         }
 
         // Parse all responses
         let mut results = Vec::with_capacity(ids.len());
         let mut pos = 0;
 
-        while pos + 6 <= total_read {
-            // Find header
+        while pos + 6 <= buf_len {
+            // Find 0xFF 0xFF header
             if buf[pos] != 0xFF || buf[pos + 1] != 0xFF {
                 pos += 1;
                 continue;
             }
 
-            let id = buf[pos + 2];
             let length = buf[pos + 3] as usize;
-            let error = buf[pos + 4];
-
-            if pos + 5 + length > total_read {
-                break; // Incomplete packet
+            if pos + length + 4 > buf_len {
+                break;
             }
 
-            if error == 0 && length > 1 {
-                let data = buf[pos + 5..pos + 5 + length - 1].to_vec();
+            let id = buf[pos + 2];
+            let error = buf[pos + 4];
+
+            if error == 0 && length >= 2 {
+                // Data is length - 2 bytes (excluding error and checksum)
+                let data = buf[pos + 5..pos + 5 + length - 2].to_vec();
                 results.push((id, data));
             }
 
-            pos += 5 + length;
+            pos += length + 4;
         }
 
         Ok(results)

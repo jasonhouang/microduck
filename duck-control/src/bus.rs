@@ -282,6 +282,15 @@ impl RobotIo for FeetechIo {
             .sync_read(&JOINT_IDS, 56, 6)
             .map_err(|e| IoError::Bus(format!("sync_read feedback: {e}")))?;
 
+        // Debug: log how many responses we got
+        if results.len() != JOINT_IDS.len() {
+            tracing::warn!(
+                expected = JOINT_IDS.len(),
+                got = results.len(),
+                "sync_read: missing servo responses"
+            );
+        }
+
         // Parse results - they may not be in order, so match by ID
         for (id, raw) in results {
             if let Some(i) = JOINT_IDS.iter().position(|&jid| jid == id) {
@@ -301,6 +310,8 @@ impl RobotIo for FeetechIo {
                 sensors.velocities[i] = raw_vel_to_rad_per_sec(raw_vel);
                 // Load is duty-cycle %, take magnitude like the old bus did for current.
                 sensors.currents_ma[i] = raw_load.abs() as f64 * 10.0; // 0.1% per unit → ~mA proxy
+            } else {
+                tracing::warn!(id, "sync_read: unexpected servo ID in response");
             }
         }
 
