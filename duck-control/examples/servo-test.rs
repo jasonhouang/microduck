@@ -16,7 +16,7 @@ fn main() {
             use duck_control::io::RobotIo;
 
             eprintln!("Reading current joint positions...\n");
-            let mut io = FeetechIo::open("/dev/ttyS2", Some("/dev/i2c-4"))
+            let mut io = FeetechIo::open("/dev/ttyS2", duck_control::ImuSource::I2c, Some("/dev/i2c-4"))
                 .expect("open servo bus");
 
             let positions = io.present_positions().expect("read positions");
@@ -60,8 +60,12 @@ fn main() {
         use duck_control::bus::FeetechIo;
         use duck_control::io::RobotIo;
 
-        let mut io = FeetechIo::open("/dev/ttyS2", Some("/dev/i2c-4"))
-            .expect("open servo bus");
+        let mut io = FeetechIo::open(
+            "/dev/ttyS2",
+            duck_control::ImuSource::I2c,
+            Some("/dev/i2c-4"),
+        )
+        .expect("open servo bus");
 
         eprintln!("Servo bus opened. Reading current positions...");
 

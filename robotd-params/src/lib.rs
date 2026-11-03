@@ -2326,7 +2326,13 @@ pub struct Bus {
     /// against firmware that cannot do it is rolled back on its own.
     pub fast_sync_read: bool,
     /// I²C bus for the body IMU (LSM6DSV16X), e.g. `/dev/i2c-4`. Empty disables it.
+    /// Only used when `body_imu_source` is `"i2c"`.
     pub body_imu_bus: String,
+    /// Where the body IMU lives. Options:
+    /// - `"none"`: no body IMU
+    /// - `"servo-bus"`: IMU board on the servo bus (ID 200, address 124)
+    /// - `"i2c"`: IMU on a separate I²C bus (requires `body_imu_bus`)
+    pub body_imu_source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2398,6 +2404,7 @@ impl Default for Bus {
             port: "/dev/ttyS2".into(),
             fast_sync_read: true,
             body_imu_bus: "/dev/i2c-4".into(),
+            body_imu_source: "i2c".into(),
         }
     }
 }

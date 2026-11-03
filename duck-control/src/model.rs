@@ -103,6 +103,17 @@ pub const BAUD_RATE: u32 = 1_000_000;
 pub const FACTORY_ID: u8 = 1;
 pub const FACTORY_BAUD_RATE: u32 = 1_000_000;
 
+/// IMU board ID on the servo bus (when fitted). The `imu_to_dxl` board answers as ID 200,
+/// providing a 12-byte block at address 56 (gyro + quaternion) in the same sync_read as servos.
+pub const IMU_BUS_ID: u8 = 200;
+
+/// Address and length of the IMU board's data block on the servo bus.
+/// The firmware's control table places the fast block at address 56:
+///   56..61 = gyro x/y/z (3× i16 LE), 62..67 = SFLP quaternion x/y/z (3× u16 LE half)
+/// This matches the servo feedback address so one sync_read at 56/6 gets gyro from both.
+pub const IMU_BUS_ADDR: u8 = 56;
+pub const IMU_BUS_LEN: u8 = 12;
+
 /// HD1910 baud register value for [`BAUD_RATE`].
 pub const FACTORY_BAUD_INDEX: u8 = 0;
 

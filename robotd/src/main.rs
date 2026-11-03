@@ -1294,12 +1294,22 @@ fn open_bus(bus: &params::Bus, attempt: u32) -> Option<BusIo> {
     let loud = attempt == 0 || attempt.is_multiple_of(STARTUP_READ_LOG_EVERY);
     let port = bus.port.as_str();
 
-    let imu_bus = if bus.body_imu_bus.is_empty() {
+    let imu_source = match bus.body_imu_source.as_str() {
+        "servo-bus" | "servo" => duck_control::ImuSource::ServoBus,
+        "i2c" => duck_control::ImuSource::I2c,
+        "none" | "" => duck_control::ImuSource::None,
+        other => {
+            tracing::warn!(source = other, "unknown body_imu_source, defaulting to none");
+            duck_control::ImuSource::None
+        }
+    };
+
+    let i2c_bus = if bus.body_imu_bus.is_empty() {
         None
     } else {
         Some(bus.body_imu_bus.as_str())
     };
-    let mut io = match duck_control::bus::FeetechIo::open(port, imu_bus) {
+    let mut io = match duck_control::bus::FeetechIo::open(port, imu_source, i2c_bus) {
         Ok(io) => io,
         Err(e) => {
             if loud {

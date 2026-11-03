@@ -121,6 +121,11 @@ pub const REGISTRY: &[Entry] = &[
         Kind::Text,
         "I²C bus for the body IMU (LSM6DSV16X), e.g. /dev/i2c-4",
     ),
+    entry(
+        "bus.body_imu_source",
+        Kind::Text,
+        "Where the body IMU lives: none, servo-bus, or i2c",
+    ),
     // ── [control] ────────────────────────────────────────────────────────────
     entry("control.hz", Kind::Integer, "Control loop rate"),
     entry(

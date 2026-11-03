@@ -12,14 +12,11 @@ use std::time::Duration;
 
 use crate::feetech::registers;
 use crate::feetech::servo::Servo;
+use crate::imu::{SflpDecoder, IMU_BLOCK_LEN};
 use crate::io::{ImuStale, IoError, JointTargets, Result, RobotIo, Sensors, SlowSensors};
 use crate::model::{
-    BAUD_RATE, EXPECTED_REGISTERS, FACTORY_ID, JOINT_IDS,
-    JOINT_NAMES, NUM_JOINTS, homing_offset,
+    BAUD_RATE, EXPECTED_REGISTERS, FACTORY_ID, IMU_BUS_ADDR, IMU_BUS_ID, IMU_BUS_LEN, JOINT_IDS, JOINT_NAMES, NUM_JOINTS,
 };
-
-#[cfg(target_os = "linux")]
-use crate::imu_i2c::ImuBus;
 
 /// 0.087 degrees per unit → radians per unit.
 const RAD_PER_UNIT: f64 = 0.087 * PI / 180.0;
@@ -46,6 +43,45 @@ const EEPROM_SETTLE: Duration = Duration::from_millis(20);
 /// HD1910 position offset: 2048 = 0° (center)
 const POS_OFFSET: i64 = 2048;
 
+/// Run of consecutive stale reads at which the journal says something.
+/// 25 reads is half a second at 50 Hz — the same span [`SflpDecoder::ready`] waits for before
+/// it will call the chip's output a measurement.
+const STALE_RUN_WARN: u64 = 25;
+
+/// IMU source configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImuSource {
+    /// No IMU fitted.
+    None,
+    /// IMU on the servo bus (ID 200, address 124).
+    ServoBus,
+    /// IMU on a separate I2C bus (Linux only).
+    #[cfg(target_os = "linux")]
+    I2c,
+}
+
+impl Default for ImuSource {
+    fn default() -> Self {
+        ImuSource::None
+    }
+}
+
+impl std::str::FromStr for ImuSource {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "none" | "off" | "disabled" => Ok(ImuSource::None),
+            "servo" | "servo-bus" | "bus" => Ok(ImuSource::ServoBus),
+            #[cfg(target_os = "linux")]
+            "i2c" => Ok(ImuSource::I2c),
+            #[cfg(not(target_os = "linux"))]
+            "i2c" => Err("I2C IMU is only supported on Linux".to_string()),
+            _ => Err(format!("unknown IMU source: {}", s)),
+        }
+    }
+}
+
 fn raw_to_radians(raw: i64) -> f64 {
     // Negate: Feetech servos are installed opposite to the simulation's Dynamixel convention.
     // This is the single place where the hardware sign flip happens.
@@ -63,33 +99,94 @@ fn raw_vel_to_rad_per_sec(raw: i64) -> f64 {
 
 pub struct FeetechIo {
     servo: Servo,
+    imu_source: ImuSource,
+    /// I2C IMU (Linux only, when imu_source == I2c).
     #[cfg(target_os = "linux")]
-    imu: Option<ImuBus>,
+    imu_i2c: Option<crate::imu_i2c::ImuBus>,
+    /// Servo bus IMU decoder (when imu_source == ServoBus).
+    imu_bus_decoder: Option<SflpDecoder>,
+    /// Stale tracking for servo bus IMU.
+    imu_bus_stale: Option<StaleImuTracker>,
+}
+
+/// Tracks stale IMU reads on the servo bus.
+#[derive(Default)]
+struct StaleImuTracker {
+    last: Option<[u8; IMU_BLOCK_LEN]>,
+    stale: ImuStale,
+}
+
+impl StaleImuTracker {
+    fn observe(&mut self, block: &[u8; IMU_BLOCK_LEN]) -> u64 {
+        if self.last.replace(*block) == Some(*block) {
+            self.stale.total = self.stale.total.saturating_add(1);
+            self.stale.run = self.stale.run.saturating_add(1);
+        } else {
+            self.stale.run = 0;
+        }
+        self.stale.run
+    }
+
+    fn get(&self) -> ImuStale {
+        self.stale
+    }
 }
 
 impl FeetechIo {
-    pub fn open(port: &str, imu_bus: Option<&str>) -> Result<Self> {
+    /// Open the servo bus and optionally attach an IMU.
+    ///
+    /// `imu_source` selects where the body IMU lives:
+    /// - `ImuSource::None`: no body IMU
+    /// - `ImuSource::ServoBus`: IMU board on the servo bus (ID 200, address 124)
+    /// - `ImuSource::I2c`: IMU on a separate I2C bus (Linux only)
+    ///
+    /// `i2c_bus_path` is only used when `imu_source == I2c`.
+    pub fn open(port: &str, imu_source: ImuSource, i2c_bus_path: Option<&str>) -> Result<Self> {
         let servo = Servo::connect(port, BAUD_RATE, READ_TIMEOUT.as_millis() as u64, false, false)
             .map_err(|e| IoError::Port {
                 path: port.to_owned(),
                 source: std::io::Error::other(std::io::Error::other(e.to_string())),
             })?;
+
         #[cfg(target_os = "linux")]
-        let imu = match imu_bus {
-            Some(bus) => match ImuBus::open(std::path::Path::new(bus), 0x6A) {
-                Ok(imu) => Some(imu),
-                Err(e) => {
-                    eprintln!("IMU open error: {}", e);
-                    tracing::warn!(error = %e, bus, "body IMU not available");
+        let imu_i2c = if imu_source == ImuSource::I2c {
+            match i2c_bus_path {
+                Some(bus) => match crate::imu_i2c::ImuBus::open(std::path::Path::new(bus), 0x6A) {
+                    Ok(imu) => Some(imu),
+                    Err(e) => {
+                        eprintln!("IMU open error: {}", e);
+                        tracing::warn!(error = %e, bus, "I2C IMU not available");
+                        None
+                    }
+                },
+                None => {
+                    tracing::warn!("I2C IMU requested but no bus path provided");
                     None
                 }
-            },
-            None => None,
+            }
+        } else {
+            None
         };
+
+        let imu_bus_decoder = if imu_source == ImuSource::ServoBus {
+            Some(SflpDecoder::default())
+        } else {
+            None
+        };
+
+        let imu_bus_stale = if imu_source == ImuSource::ServoBus {
+            Some(StaleImuTracker::default())
+        } else {
+            None
+        };
+
         Ok(Self {
             servo,
+            imu_source,
             #[cfg(target_os = "linux")]
-            imu,
+            imu_i2c,
+            imu_bus_decoder,
+            imu_bus_stale,
         })
     }
 
@@ -253,10 +350,34 @@ impl FeetechIo {
         self.servo.read_reg(id, reg).map_err(|e| IoError::Bus(format!("read reg on {id}: {e}")))
     }
 
-    /// Read IMU data only (for diagnostics, independent of servo bus).
+    /// Read raw IMU bytes directly from the bus (for diagnostics)
     #[cfg(target_os = "linux")]
+    pub fn read_imu_raw(&mut self) -> std::result::Result<[u8; 12], String> {
+        use crate::model::{IMU_BUS_ADDR, IMU_BUS_ID, IMU_BUS_LEN};
+
+        // Read 12 bytes from IMU board at address 124
+        match self.servo.read(IMU_BUS_ID, IMU_BUS_ADDR, IMU_BUS_LEN) {
+            Ok(data) => {
+                if data.len() >= 12 {
+                    let mut bytes = [0u8; 12];
+                    bytes.copy_from_slice(&data[..12]);
+                    Ok(bytes)
+                } else {
+                    Err(format!(
+                        "IMU returned only {} bytes, expected 12",
+                        data.len()
+                    ))
+                }
+            }
+            Err(e) => Err(format!("Failed to read IMU: {}", e)),
+        }
+    }
     pub fn read_imu(&mut self) -> Option<crate::imu::ImuData> {
-        self.imu.as_mut().and_then(|imu| imu.read().ok())
+        match self.imu_source {
+            ImuSource::I2c => self.imu_i2c.as_mut().and_then(|imu| imu.read().ok()),
+            ImuSource::ServoBus => None, // Servo bus IMU is read in the main read() loop
+            ImuSource::None => None,
+        }
     }
 }
 
@@ -271,29 +392,41 @@ pub fn replacement_target(missing: &[u8]) -> Option<u8> {
 impl RobotIo for FeetechIo {
     /// Read position, velocity and load for every joint, plus body IMU orientation when fitted.
     ///
-    /// Uses SyncRead (0x82) to read all 15 servos in one transaction (addresses 56–61: pos, vel, load).
-    /// This is much faster than individual reads: 1 transaction vs 15 transactions per tick.
+    /// When IMU source is ServoBus, the IMU board (ID 200) is read in the same sync_read as the
+    /// servos, from address 124 (12 bytes: gyro + quaternion). When IMU source is I2c, the IMU
+    /// is read from a separate I2C bus.
     fn read(&mut self) -> Result<Sensors> {
         let mut sensors = Sensors::default();
 
-        // Use SyncRead to read position (2 bytes), velocity (2 bytes), load (2 bytes) from all servos
+        // Build the ID list for sync_read: servos + optionally the IMU board
+        let mut ids = Vec::with_capacity(JOINT_IDS.len() + 1);
+        ids.extend_from_slice(&JOINT_IDS);
+        if self.imu_source == ImuSource::ServoBus {
+            ids.push(IMU_BUS_ID);
+        }
+
+        // Use SyncRead (0x82) to read all servos (and IMU if on bus) in one transaction
         let results = self
             .servo
-            .sync_read(&JOINT_IDS, 56, 6)
+            .sync_read(&ids, 56, 6)
             .map_err(|e| IoError::Bus(format!("sync_read feedback: {e}")))?;
 
-        // Strict check: all servos must respond
-        if results.len() != JOINT_IDS.len() {
+        // Strict check: all servos must respond (IMU is optional, may not answer)
+        let servo_count = results.iter().filter(|(id, _)| *id != IMU_BUS_ID).count();
+        if servo_count != JOINT_IDS.len() {
             return Err(IoError::ShortRead {
                 what: "sync_read feedback",
                 expected: JOINT_IDS.len(),
-                got: results.len(),
+                got: servo_count,
             });
         }
 
-        // Parse results - they may not be in order, so match by ID
-        for (id, raw) in results {
-            if let Some(i) = JOINT_IDS.iter().position(|&jid| jid == id) {
+        // Parse servo results
+        for (id, raw) in &results {
+            if *id == IMU_BUS_ID {
+                continue; // IMU handled separately
+            }
+            if let Some(i) = JOINT_IDS.iter().position(|&jid| jid == *id) {
                 if raw.len() < 6 {
                     return Err(IoError::ShortRead {
                         what: "motor feedback",
@@ -318,11 +451,41 @@ impl RobotIo for FeetechIo {
             }
         }
 
-        #[cfg(target_os = "linux")]
-        if let Some(imu) = self.imu.as_mut() {
-            if let Ok(data) = imu.read() {
-                sensors.imu = data;
+        // Handle IMU based on source
+        match self.imu_source {
+            ImuSource::ServoBus => {
+                // IMU board serves its data at IMU_BUS_ADDR (56, same as servos).
+                // Read it separately with a single-device read instruction.
+                match self.servo.read(IMU_BUS_ID, IMU_BUS_ADDR, IMU_BUS_LEN) {
+                    Ok(raw) if raw.len() >= IMU_BLOCK_LEN => {
+                        let mut block = [0u8; IMU_BLOCK_LEN];
+                        block.copy_from_slice(&raw[..IMU_BLOCK_LEN]);
+                        if let (Some(decoder), Some(tracker)) =
+                            (&mut self.imu_bus_decoder, &mut self.imu_bus_stale)
+                        {
+                            tracker.observe(&block);
+                            sensors.imu = decoder.decode(&block);
+                        }
+                    }
+                    Ok(_) => {
+                        // Short response — IMU board answered but with fewer bytes than expected.
+                        // Degrade gracefully: keep the last good IMU sample.
+                    }
+                    Err(_) => {
+                        // IMU board did not answer. This is expected if it is not fitted.
+                        // Degrade gracefully: keep the last good IMU sample.
+                    }
+                }
             }
+            #[cfg(target_os = "linux")]
+            ImuSource::I2c => {
+                if let Some(imu) = self.imu_i2c.as_mut() {
+                    if let Ok(data) = imu.read() {
+                        sensors.imu = data;
+                    }
+                }
+            }
+            ImuSource::None => {}
         }
 
         Ok(sensors)
@@ -416,20 +579,37 @@ impl RobotIo for FeetechIo {
 
     // Body IMU: reports real state when fitted, defaults otherwise.
     fn imu_stale(&self) -> ImuStale {
-        #[cfg(target_os = "linux")]
-        if let Some(imu) = self.imu.as_ref() {
-            return imu.stale();
+        match self.imu_source {
+            ImuSource::ServoBus => self
+                .imu_bus_stale
+                .as_ref()
+                .map(|t| t.get())
+                .unwrap_or_default(),
+            #[cfg(target_os = "linux")]
+            ImuSource::I2c => self
+                .imu_i2c
+                .as_ref()
+                .map(|imu| imu.stale())
+                .unwrap_or_default(),
+            ImuSource::None => ImuStale::default(),
         }
-        ImuStale::default()
     }
 
     fn imu_ready(&self) -> bool {
-        #[cfg(target_os = "linux")]
-        if let Some(imu) = self.imu.as_ref() {
-            return imu.ready();
+        match self.imu_source {
+            ImuSource::ServoBus => self
+                .imu_bus_decoder
+                .as_ref()
+                .map(|d| d.ready())
+                .unwrap_or(false),
+            #[cfg(target_os = "linux")]
+            ImuSource::I2c => self
+                .imu_i2c
+                .as_ref()
+                .map(|imu| imu.ready())
+                .unwrap_or(false),
+            ImuSource::None => false,
         }
-        // No IMU fitted — fall detection is gated on this elsewhere.
-        false
     }
 }
 

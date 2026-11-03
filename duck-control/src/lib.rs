@@ -29,3 +29,6 @@ pub use model::{
     REST_POSITION, battery_percent,
 };
 pub use obs::{ACTION_LEN, Command, OBS_LEN, Observation};
+
+// Re-export bus types for configuration
+pub use bus::ImuSource;
