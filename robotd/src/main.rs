@@ -1309,7 +1309,7 @@ fn open_bus(bus: &params::Bus, attempt: u32) -> Option<BusIo> {
     } else {
         Some(bus.body_imu_bus.as_str())
     };
-    let mut io = match duck_control::bus::FeetechIo::open(port, imu_source, i2c_bus) {
+    let mut io = match duck_control::bus::FeetechIo::open(port, imu_source, i2c_bus, bus.body_imu_mount_quat) {
         Ok(io) => io,
         Err(e) => {
             if loud {

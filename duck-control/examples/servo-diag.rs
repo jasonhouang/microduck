@@ -7,7 +7,7 @@ fn main() {
         use duck_control::io::RobotIo;
 
         println!("Opening servo bus and IMU...");
-        let mut io = match FeetechIo::open("/dev/ttyS2", duck_control::ImuSource::I2c, Some("/dev/i2c-4")) {
+        let mut io = match FeetechIo::open("/dev/ttyS2", duck_control::ImuSource::I2c, Some("/dev/i2c-4"), [1.0, 0.0, 0.0, 0.0]) {
             Ok(io) => io,
             Err(e) => {
                 eprintln!("Failed to open servo bus: {}", e);

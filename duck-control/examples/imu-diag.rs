@@ -10,7 +10,7 @@ fn main() {
         use duck_control::ImuSource;
 
         println!("Opening servo bus with servo-bus IMU source...");
-        let mut io = match FeetechIo::open("/dev/ttyS2", ImuSource::ServoBus, None) {
+        let mut io = match FeetechIo::open("/dev/ttyS2", ImuSource::ServoBus, None, [1.0, 0.0, 0.0, 0.0]) {
             Ok(io) => io,
             Err(e) => {
                 eprintln!("Failed to open servo bus: {}", e);

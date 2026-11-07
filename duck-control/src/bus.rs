@@ -141,7 +141,8 @@ impl FeetechIo {
     /// - `ImuSource::I2c`: IMU on a separate I2C bus (Linux only)
     ///
     /// `i2c_bus_path` is only used when `imu_source == I2c`.
-    pub fn open(port: &str, imu_source: ImuSource, i2c_bus_path: Option<&str>) -> Result<Self> {
+    /// `imu_mount` is the mount quaternion for the body IMU orientation correction.
+    pub fn open(port: &str, imu_source: ImuSource, i2c_bus_path: Option<&str>, imu_mount: [f64; 4]) -> Result<Self> {
         let servo = Servo::connect(port, BAUD_RATE, READ_TIMEOUT.as_millis() as u64, false, false)
             .map_err(|e| IoError::Port {
                 path: port.to_owned(),
@@ -169,7 +170,7 @@ impl FeetechIo {
         };
 
         let imu_bus_decoder = if imu_source == ImuSource::ServoBus {
-            Some(SflpDecoder::default())
+            Some(SflpDecoder::new(imu_mount))
         } else {
             None
         };

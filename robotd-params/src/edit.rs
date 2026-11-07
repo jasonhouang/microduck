@@ -300,6 +300,23 @@ impl Model {
                 }
                 array.into()
             }
+            Kind::FloatList => {
+                let mut array = toml_edit::Array::new();
+                for word in input.split(',') {
+                    let word = word.trim();
+                    if word.is_empty() {
+                        continue;
+                    }
+                    let number: f64 = word
+                        .parse()
+                        .map_err(|_| format!("{word:?} is not a number"))?;
+                    array.push(number);
+                }
+                if array.is_empty() {
+                    return Err("an empty list — give comma-separated numbers".to_owned());
+                }
+                array.into()
+            }
         };
         self.pending.insert(entry.key, Edit::Set(value));
         Ok(())

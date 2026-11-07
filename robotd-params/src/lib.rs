@@ -2333,6 +2333,9 @@ pub struct Bus {
     /// - `"servo-bus"`: IMU board on the servo bus (ID 200, address 124)
     /// - `"i2c"`: IMU on a separate I²C bus (requires `body_imu_bus`)
     pub body_imu_source: String,
+    /// IMU mount quaternion [w, x, y, z] for orientation correction.
+    /// Default is identity [1, 0, 0, 0]. Adjust based on physical IMU installation.
+    pub body_imu_mount_quat: [f64; 4],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2405,6 +2408,7 @@ impl Default for Bus {
             fast_sync_read: true,
             body_imu_bus: "/dev/i2c-4".into(),
             body_imu_source: "i2c".into(),
+            body_imu_mount_quat: [1.0, 0.0, 0.0, 0.0],
         }
     }
 }

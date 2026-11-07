@@ -36,6 +36,17 @@ port = "/dev/ttyS2"
 # empty or a missing device disables the body IMU gracefully.
 body_imu_bus = "/dev/i2c-4"
 
+# IMU source: "i2c" (default), "servo-bus", or "none"
+# - "i2c": IMU on a separate I²C bus (requires body_imu_bus)
+# - "servo-bus": IMU board on the servo bus (ID 200)
+# - "none": no body IMU
+# body_imu_source = "servo-bus"
+
+# IMU mount quaternion [w, x, y, z] for body IMU orientation correction.
+# Default is identity [1, 0, 0, 0]. Adjust based on physical IMU installation.
+# Example: [0, 0, 0, 1] for 180° rotation around Z axis (flip both X and Y)
+# body_imu_mount_quat = [0.037577263, 0.701353391, -0.035866967, 0.710918372]
+
 # Every value below that is commented out shows the built-in default. LEAVE IT COMMENTED
 # unless this robot genuinely needs a different value: install.sh copies this file to
 # /etc/robot/robotd.toml once and never overwrites it, so an uncommented value is frozen on

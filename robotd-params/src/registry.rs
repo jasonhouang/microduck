@@ -41,6 +41,8 @@ pub enum Kind {
     OptionalPath,
     /// A list of whole numbers, edited as comma-separated text ("4, 5, 9").
     IntegerList,
+    /// A list of floating-point numbers, edited as comma-separated text ("1.0, 0.0, 0.0, 0.0").
+    FloatList,
     /// A **repeating table** — `[[policy.skill]]` — rather than a single value.
     ///
     /// Listed here and not editable in place. Not an oversight and not laziness: every other
@@ -125,6 +127,11 @@ pub const REGISTRY: &[Entry] = &[
         "bus.body_imu_source",
         Kind::Text,
         "Where the body IMU lives: none, servo-bus, or i2c",
+    ),
+    entry(
+        "bus.body_imu_mount_quat",
+        Kind::FloatList,
+        "Mount quaternion [w,x,y,z] for body IMU orientation correction",
     ),
     // ── [control] ────────────────────────────────────────────────────────────
     entry("control.hz", Kind::Integer, "Control loop rate"),
@@ -1242,6 +1249,7 @@ mod tests {
                     format!("[{section}]\n{key} = \"probe\"\n")
                 }
                 Kind::IntegerList => format!("[{section}]\n{key} = [1, 2]\n"),
+                Kind::FloatList => format!("[{section}]\n{key} = [1.0, 2.0, 3.0, 4.0]\n"),
                 // A repeating table's probe is one empty entry — enough to prove the key parses
                 // as a table array, which is the thing being asserted.
                 Kind::Table => {

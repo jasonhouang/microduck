@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use linux_embedded_hal::I2cdev;
 
 #[cfg(target_os = "linux")]
-use crate::BUS_CANDIDATES;
+use tof::link::BUS_CANDIDATES;
 
 /// Madgwick 收敛速率。与 BMI088 crate 一致。
 #[cfg(target_os = "linux")]
@@ -83,6 +83,12 @@ impl ImuStatus {
             "the head IMU is off — `[head_imu] enabled = true` in robotd.toml, then restart tofd"
                 .to_owned(),
         );
+    }
+
+    pub fn elsewhere(&self, daemon: &str) {
+        self.lost(format!(
+            "on this board the head IMU is read by {daemon}: subscribe to head_imu.stream on its socket"
+        ));
     }
 
     fn lost(&self, why: String) {
