@@ -181,6 +181,12 @@ pub trait RobotIo {
     /// the budget at 50 Hz.
     fn slow_sensors(&mut self) -> Result<SlowSensors>;
 
+    /// Joint positions the backend is holding because a servo stopped answering.
+    /// Default: no joints held.
+    fn held_joint_positions(&self) -> [Option<f64>; NUM_JOINTS] {
+        [None; NUM_JOINTS]
+    }
+
     /// Diagnostics the bus keeps about itself. Default to "nothing to report" so a fake or a
     /// future backend is not obliged to invent them.
     ///
@@ -189,6 +195,28 @@ pub trait RobotIo {
     /// someone counts it, which is why it is counted.
     fn imu_stale(&self) -> ImuStale {
         ImuStale::default()
+    }
+
+    /// Native Feetech backend diagnostics. `None` from a backend with no Feetech servos.
+    fn feetech_diagnostics(&self) -> Option<crate::feetech::FeetechDiagnostics> {
+        None
+    }
+
+    /// An owned numeric snapshot for reporting, never another bus transaction.
+    fn feetech_snapshot(&self) -> Option<crate::feetech_snapshot::Snapshot> {
+        None
+    }
+
+    /// Retained acquisition evidence, separate from formatting a diagnostic report.
+    fn feetech_sync_trace(&self) -> Option<&crate::feetech::SyncTrace> {
+        None
+    }
+
+    /// The native backend reads only the guard's flags, without copying telemetry
+    /// and register snapshots. Existing diagnostic-only test backends keep the
+    /// default, which derives from the full diagnostic.
+    fn feetech_control_status(&self) -> Option<crate::feetech::FeetechControlStatus> {
+        self.feetech_diagnostics().as_ref().map(Into::into)
     }
 
     /// Has the orientation filter converged? False for the first moments after startup.

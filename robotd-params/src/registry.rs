@@ -107,7 +107,17 @@ pub const REGISTRY: &[Entry] = &[
         "Which electronic board this robot is built on — set when it is provisioned",
     ),
     // ── [bus] ────────────────────────────────────────────────────────────────
-    entry("bus.port", Kind::Text, "Dynamixel serial port device"),
+    entry(
+        "bus.protocol",
+        Kind::Choice(&["dynamixel", "feetech"]),
+        "Bus protocol: dynamixel (XL330) or feetech (HD1910)",
+    ),
+    entry(
+        "bus.feetech_calibration",
+        Kind::OptionalPath,
+        "Calibration file for Feetech servos (required when protocol = feetech)",
+    ),
+    entry("bus.port", Kind::Text, "Serial port device"),
     // Not a feature switch, though it is a `Bool`: the front page is "what does this robot
     // do", and this is "what does this robot's firmware understand". It belongs beside the
     // serial port, with the other thing you set once per board and then forget.

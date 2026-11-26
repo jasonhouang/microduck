@@ -3097,9 +3097,24 @@ impl Default for SafetyParams {
     }
 }
 
+/// Bus protocol selection. HD1910 uses Feetech; XL330 uses Dynamixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BusProtocol {
+    /// Backwards-compatible for existing XL330 installations. New HD1910 configs
+    /// explicitly choose Feetech; never auto-detect or fall back on a live bus.
+    #[default]
+    Dynamixel,
+    Feetech,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Bus {
+    /// Bus protocol: "dynamixel" (XL330) or "feetech" (HD1910).
+    pub protocol: BusProtocol,
+    /// Calibration file for Feetech servos. Required when protocol = "feetech".
+    pub feetech_calibration: Option<PathBuf>,
     /// Serial port the servos and the IMU board share. The Radxa Zero 3W wires them to
     /// `/dev/ttyS2`.
     pub port: String,
@@ -3267,6 +3282,8 @@ pub const BOOT_DEADLINE_MAX_S: u32 = 300;
 impl Default for Bus {
     fn default() -> Self {
         Self {
+            protocol: BusProtocol::Dynamixel,
+            feetech_calibration: None,
             port: "/dev/ttyS2".into(),
             fast_sync_read: true,
             impact_guard: false,

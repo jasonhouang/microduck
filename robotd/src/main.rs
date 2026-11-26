@@ -1641,7 +1641,141 @@ impl Drop for WaitingVoice {
 
 /// The real bus on the board; a fake elsewhere, so `open_bus_waiting` has one signature.
 #[cfg(target_os = "linux")]
-type BusIo = duck_control::bus::DynamixelIo;
+enum BusIo {
+    Dynamixel(duck_control::bus::DynamixelIo),
+    Feetech(duck_control::feetech::FeetechIo),
+}
+#[cfg(target_os = "linux")]
+impl BusIo {
+    fn interpolate_to(
+        &mut self,
+        target: &[f64; NUM_JOINTS],
+        duration: std::time::Duration,
+        step: std::time::Duration,
+    ) -> duck_control::io::Result<()> {
+        match self {
+            BusIo::Dynamixel(io) => io.interpolate_to(target, duration, step),
+            BusIo::Feetech(_) => Ok(()), // Feetech doesn't need this
+        }
+    }
+    fn imu_answers(&mut self) -> duck_control::io::Result<bool> {
+        match self {
+            BusIo::Dynamixel(io) => io.imu_answers(),
+            BusIo::Feetech(_) => Ok(true), // IMU is part of Feetech telemetry
+        }
+    }
+}
+#[cfg(target_os = "linux")]
+impl RobotIo for BusIo {
+    fn read(&mut self) -> duck_control::io::Result<duck_control::io::Sensors> {
+        match self {
+            BusIo::Dynamixel(io) => io.read(),
+            BusIo::Feetech(io) => io.read(),
+        }
+    }
+    fn write(&mut self, targets: &duck_control::io::JointTargets) -> duck_control::io::Result<()> {
+        match self {
+            BusIo::Dynamixel(io) => io.write(targets),
+            BusIo::Feetech(io) => io.write(targets),
+        }
+    }
+    fn measures_velocity(&self) -> bool {
+        match self {
+            BusIo::Dynamixel(io) => io.measures_velocity(),
+            BusIo::Feetech(io) => io.measures_velocity(),
+        }
+    }
+    fn measures_load(&self) -> bool {
+        match self {
+            BusIo::Dynamixel(io) => io.measures_load(),
+            BusIo::Feetech(io) => io.measures_load(),
+        }
+    }
+    fn set_gain(&mut self, kp: u16) -> duck_control::io::Result<()> {
+        match self {
+            BusIo::Dynamixel(io) => io.set_gain(kp),
+            BusIo::Feetech(io) => io.set_gain(kp),
+        }
+    }
+    fn set_torque(&mut self, on: bool) -> duck_control::io::Result<()> {
+        match self {
+            BusIo::Dynamixel(io) => io.set_torque(on),
+            BusIo::Feetech(io) => io.set_torque(on),
+        }
+    }
+    fn reboot(&mut self, id: u8) -> duck_control::io::Result<()> {
+        match self {
+            BusIo::Dynamixel(io) => io.reboot(id),
+            BusIo::Feetech(io) => io.reboot(id),
+        }
+    }
+    fn slow_sensors(&mut self) -> duck_control::io::Result<duck_control::io::SlowSensors> {
+        match self {
+            BusIo::Dynamixel(io) => io.slow_sensors(),
+            BusIo::Feetech(io) => io.slow_sensors(),
+        }
+    }
+    fn held_joint_positions(&self) -> [Option<f64>; NUM_JOINTS] {
+        match self {
+            BusIo::Dynamixel(io) => io.held_joint_positions(),
+            BusIo::Feetech(io) => io.held_joint_positions(),
+        }
+    }
+    fn imu_stale(&self) -> duck_control::io::ImuStale {
+        match self {
+            BusIo::Dynamixel(io) => io.imu_stale(),
+            BusIo::Feetech(io) => io.imu_stale(),
+        }
+    }
+    fn feetech_diagnostics(&self) -> Option<duck_control::feetech::FeetechDiagnostics> {
+        match self {
+            BusIo::Dynamixel(_) => None,
+            BusIo::Feetech(io) => io.feetech_diagnostics(),
+        }
+    }
+    fn feetech_snapshot(&self) -> Option<duck_control::feetech_snapshot::Snapshot> {
+        match self {
+            BusIo::Dynamixel(_) => None,
+            BusIo::Feetech(io) => io.feetech_snapshot(),
+        }
+    }
+    fn feetech_sync_trace(&self) -> Option<&duck_control::feetech::SyncTrace> {
+        match self {
+            BusIo::Dynamixel(_) => None,
+            BusIo::Feetech(io) => io.feetech_sync_trace(),
+        }
+    }
+    fn feetech_control_status(&self) -> Option<duck_control::feetech::FeetechControlStatus> {
+        match self {
+            BusIo::Dynamixel(_) => None,
+            BusIo::Feetech(io) => io.feetech_control_status(),
+        }
+    }
+    fn imu_ready(&self) -> bool {
+        match self {
+            BusIo::Dynamixel(io) => io.imu_ready(),
+            BusIo::Feetech(io) => io.imu_ready(),
+        }
+    }
+    fn hardware_errors(&mut self) -> duck_control::io::Result<Option<[u8; NUM_JOINTS]>> {
+        match self {
+            BusIo::Dynamixel(io) => io.hardware_errors(),
+            BusIo::Feetech(io) => io.hardware_errors(),
+        }
+    }
+    fn servo_identity(&mut self) -> duck_control::io::Result<Option<[duck_control::io::ServoIdentity; NUM_JOINTS]>> {
+        match self {
+            BusIo::Dynamixel(io) => io.servo_identity(),
+            BusIo::Feetech(io) => io.servo_identity(),
+        }
+    }
+    fn census(&mut self) -> duck_control::io::Result<Option<duck_control::io::Census>> {
+        match self {
+            BusIo::Dynamixel(io) => io.census(),
+            BusIo::Feetech(io) => io.census(),
+        }
+    }
+}
 #[cfg(not(target_os = "linux"))]
 type BusIo = FakeIo;
 
@@ -1780,6 +1914,81 @@ fn open_bus(
     let loud = attempt == 0 || attempt.is_multiple_of(STARTUP_READ_LOG_EVERY);
     let port = bus.port.as_str();
 
+    if bus.protocol == params::BusProtocol::Feetech {
+        // HD1910 Feetech path
+        let calibration_path = match bus.feetech_calibration.as_ref() {
+            Some(p) => p,
+            None => {
+                if loud {
+                    tracing::error!("Feetech protocol requires feetech_calibration path");
+                }
+                return None;
+            }
+        };
+        
+        let calibration_str = match std::fs::read_to_string(calibration_path) {
+            Ok(s) => s,
+            Err(e) => {
+                if loud {
+                    tracing::error!(error = %e, path = %calibration_path.display(), "cannot read calibration file");
+                }
+                return None;
+            }
+        };
+        
+        let calibration: duck_control::feetech::Calibration = match toml::from_str(&calibration_str) {
+            Ok(c) => c,
+            Err(e) => {
+                if loud {
+                    tracing::error!(error = %e, "cannot parse calibration file");
+                }
+                return None;
+            }
+        };
+        
+        if let Err(e) = calibration.validate_motion() {
+            if loud {
+                tracing::error!(error = %e, "calibration validation failed");
+            }
+            return None;
+        }
+        
+        let raw_bus = match duck_control::feetech::Bus::open(port) {
+            Ok(b) => b,
+            Err(e) => {
+                if loud {
+                    tracing::error!(error = %e, port, "cannot open Feetech bus");
+                }
+                return None;
+            }
+        };
+        
+        let mut io = match duck_control::feetech::FeetechIo::for_startup(raw_bus, calibration) {
+            Ok(io) => io,
+            Err(e) => {
+                if loud {
+                    tracing::error!(error = %e, "cannot initialize FeetechIo");
+                }
+                return None;
+            }
+        };
+        
+        // Confirm startup limp state - critical for Feetech
+        if let Err(e) = io.confirm_startup_limp() {
+            if loud {
+                tracing::error!(error = %e, "confirm_startup_limp failed");
+            }
+            return None;
+        }
+        
+        if loud {
+            tracing::info!("native Feetech selected; startup torque OFF confirmed");
+        }
+        
+        return Some(BusIo::Feetech(io));
+    }
+
+    // Dynamixel path (XL330)
     let mut io = match duck_control::bus::DynamixelIo::open(port, bus.fast_sync_read) {
         Ok(io) => io,
         Err(e) => {
@@ -1823,7 +2032,7 @@ fn open_bus(
             return None;
         }
     }
-    Some(io)
+    Some(BusIo::Dynamixel(io))
 }
 
 /// Does the IMU board answer, now that every servo has?
@@ -1876,7 +2085,7 @@ fn imu_answers(_io: &mut BusIo, _attempt: u32) -> Option<bool> {
 /// cannot be told apart and is left to a human.
 #[cfg(target_os = "linux")]
 fn adopt_missing_servo(
-    io: &mut BusIo,
+    io: &mut duck_control::bus::DynamixelIo,
     loud: bool,
     silent: &mut Vec<u8>,
     adopted: &mut Option<u8>,

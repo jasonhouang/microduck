@@ -8,7 +8,12 @@
 //! designed in `docs/design/robotd-design.md` §2.
 
 pub mod bus;
+pub mod deployment;
 pub mod fall;
+pub mod feetech;
+pub mod feetech_snapshot;
+pub mod hardware;
+pub mod hd1910;
 pub mod imu;
 pub mod io;
 pub mod model;

@@ -221,6 +221,27 @@ impl<T: RobotIo> Safety<T> {
         self.io.impact_guard()
     }
 
+    /// Native diagnostics, without exposing a second motor write handle.
+    pub fn feetech_diagnostics(&self) -> Option<crate::feetech::FeetechDiagnostics> {
+        self.io.feetech_diagnostics()
+    }
+
+    pub fn feetech_control_status(&self) -> Option<crate::feetech::FeetechControlStatus> {
+        self.io.feetech_control_status()
+    }
+
+    pub fn feetech_snapshot(&self) -> Option<crate::feetech_snapshot::Snapshot> {
+        self.io.feetech_snapshot()
+    }
+
+    pub fn feetech_sync_trace(&self) -> Option<&crate::feetech::SyncTrace> {
+        self.io.feetech_sync_trace()
+    }
+
+    pub fn held_joint_positions(&self) -> [Option<f64>; NUM_JOINTS] {
+        self.io.held_joint_positions()
+    }
+
     pub fn fallen(&self) -> bool {
         self.fallen
     }
